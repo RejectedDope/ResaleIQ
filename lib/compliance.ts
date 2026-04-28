@@ -1,21 +1,23 @@
 const standardSizes = ['XS','S','M','L','XL','XXL','0','2','4','6','8','10','12','14','16','OS','One Size'];
 
-export function normalizeSize(size) {
+export function normalizeSize(size: string = ''): string {
   if (!size) return '';
-  const map = {
+
+  const map: Record<string, string> = {
     'Small': 'S',
     'Medium': 'M',
     'Large': 'L',
     'Extra Large': 'XL',
     'One Size Fits All': 'One Size'
   };
+
   return map[size] || size;
 }
 
-export function calculateCompliance(input) {
+export function calculateCompliance(input: any) {
   let score = 100;
-  const missingFields = [];
-  const requiredFixes = [];
+  const missingFields: string[] = [];
+  const requiredFixes: string[] = [];
   const size = normalizeSize(input.size);
   const category = (input.category || '').toLowerCase();
 
@@ -26,11 +28,20 @@ export function calculateCompliance(input) {
   const fashion = ['fashion','clothing','shoes','accessories'].some(v => category.includes(v));
 
   if (fashion && !size) { score -= 20; missingFields.push('Size'); }
-  if (fashion && size && !standardSizes.includes(size)) { score -= 15; requiredFixes.push('Use standard size format'); }
-  if (fashion && !input.material) { score -= 10; missingFields.push('Material'); }
+  if (fashion && size && !standardSizes.includes(size)) {
+    score -= 15;
+    requiredFixes.push('Use standard size format');
+  }
+
+  if (fashion && !input.material) {
+    score -= 10;
+    missingFields.push('Material');
+  }
 
   score = Math.max(score, 0);
-  const riskLevel: 'Low' | 'Medium' | 'High' = score >= 80 ? 'Low' : score >= 60 ? 'Medium' : 'High';
+
+  const riskLevel: 'Low' | 'Medium' | 'High' =
+    score >= 80 ? 'Low' : score >= 60 ? 'Medium' : 'High';
 
   return {
     score,
