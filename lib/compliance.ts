@@ -30,7 +30,7 @@ export function calculateCompliance(input) {
   if (fashion && !input.material) { score -= 10; missingFields.push('Material'); }
 
   score = Math.max(score, 0);
-  const riskLevel = score >= 80 ? 'Low' : score >= 60 ? 'Medium' : 'High';
+  const riskLevel: 'Low' | 'Medium' | 'High' = score >= 80 ? 'Low' : score >= 60 ? 'Medium' : 'High';
 
   return {
     score,
