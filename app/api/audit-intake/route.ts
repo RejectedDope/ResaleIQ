@@ -24,11 +24,31 @@ export async function POST(request: Request) {
       receivedAt: new Date().toISOString()
     }
 
-    console.log('ResaleIQ audit intake received', intake)
+    const webhookUrl = process.env.POWER_AUTOMATE_AUDIT_WEBHOOK_URL
+
+    if (webhookUrl) {
+      const flowResponse = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(intake)
+      })
+
+      if (!flowResponse.ok) {
+        console.error('Power Automate webhook failed', await flowResponse.text())
+        return NextResponse.json(
+          { ok: false, message: 'Audit received but SharePoint sync failed.' },
+          { status: 502 }
+        )
+      }
+    } else {
+      console.warn('POWER_AUTOMATE_AUDIT_WEBHOOK_URL is not configured')
+    }
 
     return NextResponse.json({
       ok: true,
-      message: 'Audit intake received',
+      message: webhookUrl ? 'Audit intake received and sent to SharePoint workflow' : 'Audit intake received without SharePoint sync',
       intake
     })
   } catch (error) {
