@@ -12,7 +12,11 @@ const initialAnswers: AuditAnswers = {
   biggestProblem: '',
   desiredOutcome: ''
 }
-
+const paymentLinks: Record<string, string> = {
+  'Quick Recovery Audit': 'https://www.paypal.com/ncp/payment/VV4W3ULJPZ27C',
+  'Standard Recovery Audit': 'https://www.paypal.com/ncp/payment/6RXLRHPUGYXX4',
+  'Growth Recovery Audit': 'https://www.paypal.com/ncp/payment/R7Q4AP5TT84KY'
+}
 const platformOptions = ['eBay', 'Poshmark', 'Mercari', 'Facebook Marketplace', 'Depop', 'Other']
 const listingOptions = ['Under 25', '25–50', '50–100', '100–250', '250+']
 const staleOptions = ['Under 10', '10–25', '25–50', '50–100', '100+']
@@ -23,7 +27,7 @@ export default function AuditPage() {
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState<AuditAnswers>(initialAnswers)
   const result = useMemo(() => recommendAudit(answers), [answers])
-
+const paymentLink = paymentLinks[result.tier] || '/contact'
   function toggleArray(field: 'platforms' | 'categories', value: string) {
     const current = answers[field]
     setAnswers({
@@ -95,10 +99,13 @@ export default function AuditPage() {
             </section>
             <RecommendationList items={result.nextSteps} />
             <section className="rounded-2xl border border-[#E2DDD5] bg-white p-6">
-              <a href="https://www.paypal.biz/jaynedopecustoms" target="_blank" className="inline-block rounded-xl bg-[#D45C2D] px-5 py-3 text-sm font-semibold text-white">Continue to Payment</a>
-            </section>
-          </>
-        )}
+         <a
+  href={paymentLink}
+  target="_blank"
+  className="inline-block rounded-xl bg-[#D45C2D] px-5 py-3 text-sm font-semibold text-white"
+>
+  Start Your Recommended Audit
+</a>
 
         <div className="flex justify-between">
           <button disabled={step === 0} onClick={() => setStep(step - 1)} className="rounded-xl border border-[#E2DDD5] bg-white px-5 py-3 text-sm font-semibold disabled:opacity-40">Back</button>
