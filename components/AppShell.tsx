@@ -5,7 +5,8 @@ const links = [
   { href: '/analyze', label: 'Analyze' },
   { href: '/profit', label: 'Profit' },
   { href: '/compliance', label: 'Compliance' },
-  { href: '/dead-listings', label: 'Dead Listings' }
+  { href: '/dead-listings', label: 'Dead Listings' },
+  { href: '/audit', label: 'Audit Agent' }
 ]
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
