@@ -1,10 +1,30 @@
 import Link from 'next/link'
 
-const includedActions = [
-  'Relist strategy',
-  'Repricing recommendations',
-  'Crosslisting opportunities',
-  'Liquidation decisions'
+const pricingTiers = [
+  {
+    name: 'Quick Recovery Audit',
+    price: '$39',
+    listings: 'Up to 20 listings',
+    extras: '+$1 per additional listing'
+  },
+  {
+    name: 'Standard Recovery Audit',
+    price: '$79',
+    listings: 'Up to 50 listings',
+    extras: '+$0.75 per additional listing'
+  },
+  {
+    name: 'Growth Recovery Audit',
+    price: '$149',
+    listings: 'Up to 100 listings',
+    extras: '+$0.50 per additional listing'
+  },
+  {
+    name: 'High Volume Seller',
+    price: 'Custom Quote',
+    listings: '150+ listings',
+    extras: 'Scope reviewed before pricing'
+  }
 ]
 
 export default function AuditCTA() {
@@ -15,21 +35,24 @@ export default function AuditCTA() {
         <h2 className="text-2xl font-bold">Dead Inventory Audit</h2>
         <p className="text-sm text-[#5C5449]">
           Recover trapped cash from stale inventory, weak pricing, and low-converting listings.
-          Get a direct action plan instead of guessing what to relist or liquidate.
+          Get a direct action plan instead of guessing what to relist, reprice, or liquidate.
         </p>
-        <div className="rounded-xl border border-[#F0EDE6] p-4">
-          <p className="font-semibold">Starting at $97</p>
-          <ul className="mt-3 space-y-2 text-sm text-[#5C5449]">
-            {includedActions.map((item) => (
-              <li key={item}>• {item}</li>
-            ))}
-          </ul>
+
+        <div className="space-y-3">
+          {pricingTiers.map((tier) => (
+            <div key={tier.name} className="rounded-xl border border-[#F0EDE6] p-4">
+              <p className="font-semibold">{tier.name} — {tier.price}</p>
+              <p className="text-sm text-[#5C5449]">{tier.listings}</p>
+              <p className="text-sm text-[#5C5449]">{tier.extras}</p>
+            </div>
+          ))}
         </div>
+
         <Link
-          href="/dead-listings"
+          href="/audit"
           className="inline-block rounded-xl bg-[#D45C2D] px-5 py-3 text-sm font-semibold text-white"
         >
-          Start Audit Review
+          Start Audit Agent
         </Link>
       </div>
     </section>
