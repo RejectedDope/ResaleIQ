@@ -1,4 +1,5 @@
 import ScoreCard from '@/components/ScoreCard'
+import AuditCTA from '@/components/AuditCTA'
 import { dashboardMetrics, sampleDeadListings } from '@/lib/sampleData'
 
 export default function DashboardPage() {
@@ -32,6 +33,8 @@ export default function DashboardPage() {
             ))}
           </div>
         </section>
+
+        <AuditCTA />
       </div>
     </div>
   )
