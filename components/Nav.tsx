@@ -4,18 +4,18 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const links = [
-  { href: '/', label: 'Dashboard' },
-  { href: '/analyze', label: 'New Item Analysis' },
-  { href: '/compliance', label: 'Compliance Checker' },
-  { href: '/profit', label: 'Profit Calculator' },
-  { href: '/dead-listings', label: 'Dead Listings' },
+  { href: '/', label: 'Recovery Dashboard' },
+  { href: '/dead-listings', label: 'Recovery Room' },
+  { href: '/analyze', label: 'Decision Engine' },
+  { href: '/compliance', label: 'Compliance Check' },
+  { href: '/profit', label: 'Profit Check' },
 ];
 
 export function Nav() {
   const pathname = usePathname();
 
   return (
-    <nav className="mb-6 rounded-xl border border-tan bg-white p-2 shadow-sm">
+    <nav className="mb-8 rounded-3xl border border-tan bg-white p-3 shadow-sm">
       <div className="flex flex-wrap gap-2">
         {links.map((link) => {
           const active = pathname === link.href;
@@ -23,7 +23,11 @@ export function Nav() {
             <Link
               key={link.href}
               href={link.href}
-              className={`rounded-lg px-3 py-2 text-sm ${active ? 'bg-sage text-white' : 'bg-ivory text-slate-700 hover:bg-tan/40'}`}
+              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                active
+                  ? 'bg-ink text-white shadow-sm'
+                  : 'bg-ivory text-slate-700 hover:bg-tan/40'
+              }`}
             >
               {link.label}
             </Link>
