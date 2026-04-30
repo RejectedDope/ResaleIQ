@@ -4,11 +4,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const links = [
-  { href: '/', label: 'Dashboard' },
-  { href: '/dead-listings', label: 'Recovery Room' },
-  { href: '/analyze', label: 'Decision Engine' },
-  { href: '/compliance', label: 'Compliance' },
-  { href: '/profit', label: 'Profit' },
+  { href: '/', label: 'Money Dashboard' },
+  { href: '/dead-listings', label: 'Recover Inventory' },
+  { href: '/analyze', label: 'Fix One Item' },
+  { href: '/compliance', label: 'Fix Compliance' },
+  { href: '/profit', label: 'Protect Profit' },
 ];
 
 export function Nav() {
