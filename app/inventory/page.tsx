@@ -18,9 +18,15 @@ type InventoryDraft = {
 
 type ParsedRow = Record<string, string | number | boolean | null | undefined>;
 type InventoryField = 'title' | 'price' | 'cost' | 'platform' | 'condition' | 'shipping';
-type ColumnMap = Record<InventoryField, string>;
 type Confidence = 'High' | 'Medium' | 'Low';
+type ColumnMap = Record<InventoryField, string>;
 type ConfidenceMap = Record<InventoryField, Confidence>;
+
+type ColumnDetection = {
+  column: string;
+  confidence: Confidence;
+  source: 'header' | 'preview' | 'missing';
+};
 
 const MAX_IMPORT_ROWS = 100;
 const REQUIRED_FIELDS: InventoryField[] = ['title', 'price'];
@@ -33,6 +39,15 @@ const INVENTORY_FIELDS: { key: InventoryField; label: string; required?: boolean
   { key: 'condition', label: 'Condition' },
   { key: 'shipping', label: 'Shipping' },
 ];
+
+const FIELD_ALIASES: Record<InventoryField, string[]> = {
+  title: ['title', 'item', 'item name', 'name', 'product', 'product name', 'listing title', 'description'],
+  price: ['price', 'list price', 'sale price', 'listing price', 'current price', 'asking price', 'ask price'],
+  cost: ['cost', 'purchase', 'purchase price', 'buy price', 'buy cost', 'purchase cost', 'cogs', 'item cost'],
+  platform: ['platform', 'site', 'marketplace', 'channel', 'selling site'],
+  condition: ['condition', 'grade', 'item condition'],
+  shipping: ['shipping', 'shipping cost', 'shipping paid', 'ship cost', 'postage', 'ship'],
+};
 
 const STARTER_ITEMS: InventoryDraft[] = [
   { id: 1, title: 'Nike Tech Fleece Joggers Gray Mens Medium', price: 42, cost: 18, platform: 'eBay', condition: 'Pre-owned good', shipping: 7.5 },
@@ -81,48 +96,111 @@ function normalizePlatform(value: unknown) {
 }
 
 function normalizeColumnName(column: string) {
-  return column.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return column.toLowerCase().replace(/[_-]+/g, ' ').replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function compactColumnName(column: string) {
+  return normalizeColumnName(column).replace(/\s/g, '');
 }
 
 function isMeaningfulColumn(column: string) {
-  const key = normalizeColumnName(column);
+  const key = compactColumnName(column);
   return Boolean(key && !/^empty\d*$/.test(key) && !/^__empty\d*$/.test(key) && key !== 'blank');
 }
 
-function detectColumn(columns: string[], exact: string[], partial: string[]) {
-  const normalized = columns.map((column) => ({ column, key: normalizeColumnName(column) }));
-  const exactMatch = normalized.find(({ key }) => exact.includes(key));
-  if (exactMatch) return { column: exactMatch.column, confidence: 'High' as Confidence };
-  const partialMatch = normalized.find(({ key }) => partial.some((needle) => key.includes(needle)));
-  if (partialMatch) return { column: partialMatch.column, confidence: 'Medium' as Confidence };
-  return { column: '', confidence: 'Low' as Confidence };
+function sampleValues(rows: ParsedRow[], column: string) {
+  return rows.slice(0, 12).map((row) => row[column]).filter((value) => normalizeText(value));
 }
 
-function inferMapping(columns: string[]) {
-  const title = detectColumn(columns, ['title', 'item', 'name', 'itemname', 'product'], ['itemtitle', 'description', 'productname']);
-  const price = detectColumn(columns, ['price', 'listprice', 'listingprice', 'saleprice'], ['askingprice', 'askprice', 'currentprice']);
-  const cost = detectColumn(columns, ['cost', 'purchase', 'buyprice', 'purchaseprice'], ['purchasecost', 'buycost', 'itemcost', 'cogs']);
-  const platform = detectColumn(columns, ['platform', 'site', 'marketplace'], ['channel', 'sellingsite']);
-  const condition = detectColumn(columns, ['condition', 'grade'], ['itemcondition']);
-  const shipping = detectColumn(columns, ['shipping', 'ship', 'postage'], ['shippingcost', 'shippingpaid', 'shipcost']);
+function textScore(rows: ParsedRow[], column: string) {
+  const values = sampleValues(rows, column);
+  if (!values.length) return 0;
+  const textValues = values.filter((value) => {
+    const text = normalizeText(value);
+    return text.length >= 4 && toNumber(value) === 0 && /[a-z]/i.test(text);
+  });
+  const avgLength = textValues.reduce((sum, value) => sum + normalizeText(value).length, 0) / Math.max(textValues.length, 1);
+  return textValues.length * 2 + avgLength / 12;
+}
+
+function moneyScore(rows: ParsedRow[], column: string) {
+  const values = sampleValues(rows, column);
+  if (!values.length) return 0;
+  const numericValues = values.map(toNumber).filter((value) => value > 0 && value < 100000);
+  return numericValues.length / values.length;
+}
+
+function platformScore(rows: ParsedRow[], column: string) {
+  const platforms = ['ebay', 'poshmark', 'mercari', 'depop', 'facebook', 'etsy', 'grailed'];
+  const values = sampleValues(rows, column).map((value) => normalizeText(value).toLowerCase());
+  if (!values.length) return 0;
+  return values.filter((value) => platforms.some((platform) => value.includes(platform))).length / values.length;
+}
+
+function conditionScore(rows: ParsedRow[], column: string) {
+  const conditions = ['new', 'used', 'preowned', 'pre-owned', 'good', 'fair', 'excellent', 'worn', 'like new'];
+  const values = sampleValues(rows, column).map((value) => normalizeText(value).toLowerCase());
+  if (!values.length) return 0;
+  return values.filter((value) => conditions.some((condition) => value.includes(condition))).length / values.length;
+}
+
+function headerDetection(columns: string[], aliases: string[]) {
+  const normalizedAliases = aliases.map((alias) => normalizeColumnName(alias));
+  const compactAliases = aliases.map((alias) => compactColumnName(alias));
+  const normalizedColumns = columns.map((column) => ({
+    column,
+    normalized: normalizeColumnName(column),
+    compact: compactColumnName(column),
+  }));
+
+  const exact = normalizedColumns.find(({ normalized, compact }) => normalizedAliases.includes(normalized) || compactAliases.includes(compact));
+  if (exact) return { column: exact.column, confidence: 'High' as Confidence };
+
+  const fuzzy = normalizedColumns.find(({ normalized, compact }) => (
+    normalizedAliases.some((alias) => normalized.includes(alias) || alias.includes(normalized)) ||
+    compactAliases.some((alias) => compact.includes(alias) || alias.includes(compact))
+  ));
+
+  if (fuzzy) return { column: fuzzy.column, confidence: 'Medium' as Confidence };
+  return null;
+}
+
+function previewDetection(field: InventoryField, columns: string[], rows: ParsedRow[], usedColumns: Set<string>): ColumnDetection {
+  const availableColumns = columns.filter((column) => !usedColumns.has(column));
+  const ranked = availableColumns
+    .map((column) => {
+      if (field === 'title') return { column, score: textScore(rows, column) };
+      if (field === 'platform') return { column, score: platformScore(rows, column) };
+      if (field === 'condition') return { column, score: conditionScore(rows, column) };
+      return { column, score: moneyScore(rows, column) };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const best = ranked[0];
+  if (!best) return { column: '', confidence: 'Low', source: 'missing' };
+  const threshold = field === 'title' ? 4 : field === 'platform' || field === 'condition' ? 0.35 : 0.5;
+  if (best.score >= threshold) return { column: best.column, confidence: 'Medium', source: 'preview' };
+  return { column: '', confidence: 'Low', source: 'missing' };
+}
+
+function detectField(field: InventoryField, columns: string[], rows: ParsedRow[], usedColumns: Set<string>): ColumnDetection {
+  const header = headerDetection(columns.filter((column) => !usedColumns.has(column)), FIELD_ALIASES[field]);
+  if (header) return { ...header, source: 'header' };
+  return previewDetection(field, columns, rows, usedColumns);
+}
+
+function inferMapping(columns: string[], rows: ParsedRow[]) {
+  const usedColumns = new Set<string>();
+  const detections = INVENTORY_FIELDS.reduce((current, field) => {
+    const detection = detectField(field.key, columns, rows, usedColumns);
+    if (detection.column) usedColumns.add(detection.column);
+    return { ...current, [field.key]: detection };
+  }, {} as Record<InventoryField, ColumnDetection>);
 
   return {
-    mapping: {
-      title: title.column,
-      price: price.column,
-      cost: cost.column,
-      platform: platform.column,
-      condition: condition.column,
-      shipping: shipping.column,
-    },
-    confidence: {
-      title: title.confidence,
-      price: price.confidence,
-      cost: cost.confidence,
-      platform: platform.confidence,
-      condition: condition.confidence,
-      shipping: shipping.confidence,
-    },
+    mapping: INVENTORY_FIELDS.reduce((current, field) => ({ ...current, [field.key]: detections[field.key].column }), EMPTY_MAPPING),
+    confidence: INVENTORY_FIELDS.reduce((current, field) => ({ ...current, [field.key]: detections[field.key].confidence }), EMPTY_CONFIDENCE),
+    detections,
   };
 }
 
@@ -151,10 +229,10 @@ function cleanRows(rows: ParsedRow[], mapping: ColumnMap) {
     const platform = normalizePlatform(row[mapping.platform]);
     const condition = normalizeCondition(row[mapping.condition]) || 'condition missing';
 
-    if (!mapping.cost) warnings.push('We could not find your cost column, so missing costs were treated as $0.');
-    if (!mapping.platform) warnings.push('We could not find your platform column, so eBay was used as the default.');
-    if (!mapping.condition) warnings.push('We could not find your condition column, so condition missing was used.');
-    if (!mapping.shipping) warnings.push('We could not find your shipping column, so shipping was treated as $0.');
+    if (!mapping.cost) warnings.push('Cost was not detected, so missing costs were treated as $0.');
+    if (!mapping.platform) warnings.push('Platform was not detected, so eBay was used as the default.');
+    if (!mapping.condition) warnings.push('Condition was not detected, so condition missing was used.');
+    if (!mapping.shipping) warnings.push('Shipping was not detected, so shipping was treated as $0.');
 
     return { id: index + 1, title, price, cost, platform, condition, shipping };
   });
@@ -343,12 +421,14 @@ export default function InventoryPage() {
     setShowFieldEditor(false);
     try {
       const parsed = await parseInventoryFile(file);
-      const detection = inferMapping(parsed.columns);
+      const detection = inferMapping(parsed.columns, parsed.rows);
       const nextWarnings: string[] = [];
 
       if (!parsed.rows.length) nextWarnings.push('We could not find any inventory rows in this file.');
-      if (!detection.mapping.title) nextWarnings.push('We could not find your title column.');
-      if (!detection.mapping.price) nextWarnings.push('We could not find your price column.');
+      if (parsed.rows.length && detection.mapping.title) nextWarnings.push(`We detected "${detection.mapping.title}" as your title column. Confirm with the preview.`);
+      if (parsed.rows.length && detection.mapping.price) nextWarnings.push(`We detected "${detection.mapping.price}" as your price column. Confirm with the preview.`);
+      if (parsed.rows.length && !detection.mapping.title) nextWarnings.push('We still need your title column. Open Adjust Fields if the preview shows it under a different name.');
+      if (parsed.rows.length && !detection.mapping.price) nextWarnings.push('We still need your price column. Open Adjust Fields if the preview shows it under a different name.');
       if (parsed.rows.length > MAX_IMPORT_ROWS) nextWarnings.push(`This file has ${parsed.rows.length} rows. The MVP will use the first ${MAX_IMPORT_ROWS}.`);
 
       setFileName(file.name);
@@ -446,7 +526,7 @@ export default function InventoryPage() {
             <input className="hidden" type="file" accept=".csv,.xlsx,.xls" onChange={(event) => handleFile(event.target.files?.[0])} />
           </label>
           <div className="mt-4 rounded-2xl bg-ivory p-4 text-sm font-bold text-slate-700">
-            {isParsing ? 'Reading your file...' : fileName ? `Loaded: ${fileName}` : 'Example columns: title, price, cost, platform, condition, shipping'}
+            {isParsing ? 'Reading your file...' : fileName ? `Loaded: ${fileName}` : 'Example columns: item name, listing price, buy price, marketplace, condition, shipping'}
           </div>
         </div>
 
@@ -472,11 +552,23 @@ export default function InventoryPage() {
                 {INVENTORY_FIELDS.map((field) => {
                   const detected = mapping[field.key];
                   const requiredMissing = Boolean(field.required && !detected);
+                  const needsReview = Boolean(detected && confidence[field.key] !== 'High');
+                  const cardClass = requiredMissing
+                    ? 'border border-red-200 bg-red-50 text-red-800'
+                    : needsReview
+                      ? 'border border-[#FFD36B]/60 bg-[#FFD36B]/10 text-[#6F4A00]'
+                      : 'border border-tan bg-ivory text-slate-700';
+                  const detectedMessage = detected
+                    ? `We detected this as your ${field.label.toLowerCase()} column: ${detected}`
+                    : field.required
+                      ? `We still need your ${field.label.toLowerCase()} column`
+                      : 'Not detected, optional';
+
                   return (
-                    <div key={field.key} className={`rounded-2xl p-4 ${requiredMissing ? 'bg-red-50 text-red-800' : 'bg-ivory text-slate-700'}`}>
+                    <div key={field.key} className={`rounded-2xl p-4 ${cardClass}`}>
                       <p className="text-xs font-extrabold uppercase tracking-[0.16em] opacity-70">{field.label}</p>
-                      <p className="mt-2 text-sm font-extrabold">{detected || (field.key === 'price' ? 'We could not find your price column' : field.key === 'title' ? 'We could not find your title column' : 'Not found, optional')}</p>
-                      <p className="mt-2 text-xs font-bold">Confidence: {detected ? confidence[field.key] : 'Low'}</p>
+                      <p className="mt-2 text-sm font-extrabold">{detectedMessage}</p>
+                      <p className="mt-2 text-xs font-bold">Confidence: {detected ? confidence[field.key] : 'Low'}{needsReview ? ' - review preview' : ''}</p>
                     </div>
                   );
                 })}
@@ -539,13 +631,11 @@ export default function InventoryPage() {
       </div>
 
       {warnings.length || requiredMappingMissing.length || mappingSummary.priceProblems || mappingSummary.missingTitles ? (
-        <div className="rounded-2xl border border-[#FFD36B]/50 bg-[#FFD36B]/10 p-5">
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#8A5A00]">Needs attention</p>
+        <div className={`rounded-2xl border p-5 ${requiredMappingMissing.length ? 'border-red-200 bg-red-50' : 'border-[#FFD36B]/50 bg-[#FFD36B]/10'}`}>
+          <p className={`text-xs font-bold uppercase tracking-[0.2em] ${requiredMappingMissing.length ? 'text-red-800' : 'text-[#8A5A00]'}`}>{requiredMappingMissing.length ? 'Missing required data' : 'Review before importing'}</p>
           <ul className="mt-3 space-y-2 text-sm font-bold text-slate-700">
-            {requiredMappingMissing.includes('title') ? <li>- We could not find your title column.</li> : null}
-            {requiredMappingMissing.includes('price') ? <li>- We could not find your price column.</li> : null}
-            {mappingSummary.missingTitles ? <li>- Some rows are missing item titles.</li> : null}
-            {mappingSummary.priceProblems ? <li>- Some rows need a usable price above $0.</li> : null}
+            {mappingSummary.missingTitles && mapping.title ? <li>- Some rows are missing item titles.</li> : null}
+            {mappingSummary.priceProblems && mapping.price ? <li>- Some rows need a usable price above $0.</li> : null}
             {warnings.map((warning) => <li key={warning}>- {warning}</li>)}
           </ul>
         </div>
