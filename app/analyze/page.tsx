@@ -47,19 +47,32 @@ const NUMBER_FIELDS: [keyof ListingInput, string][] = [
   ['listingAgeDays', 'Days listed'],
 ];
 
+function finalDecision(action: string) {
+  if (action === 'Donate/Liquidate') return 'LIQUIDATE';
+  if (action === 'Reprice') return 'REPRICE';
+  if (action === 'Hold') return 'HOLD';
+  return 'SELL';
+}
+
+function estimatedRoi(input: ListingInput) {
+  return Math.round(((input.targetSalePrice - input.purchaseCost - input.shippingPaid) / Math.max(input.purchaseCost, 1)) * 100);
+}
+
 export default function AnalyzePage() {
   const [form, setForm] = useState<ListingInput>(INITIAL);
   const [analysis, setAnalysis] = useState<ListingAnalysis | null>(null);
 
   const update = (key: keyof ListingInput, value: string | number | boolean) => setForm((p) => ({ ...p, [key]: value }));
+  const decision = analysis ? finalDecision(analysis.deadListingRisk.recommendedAction) : null;
+  const roi = estimatedRoi(form);
 
   return (
     <section className="space-y-8">
       <div className="rounded-2xl border border-[#29204E] bg-[#070A18] p-6 text-white shadow-xl md:p-8">
         <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#C59BFF]">Decision Engine</p>
-        <h2 className="mt-3 text-4xl font-extrabold tracking-tight md:text-5xl">Score the item before it becomes dead inventory.</h2>
+        <h2 className="mt-3 text-4xl font-extrabold tracking-tight md:text-5xl">Decide whether this item should SELL, HOLD, REPRICE, or LIQUIDATE.</h2>
         <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-          This is not a listing generator. It turns item economics, compliance gaps, platform fit, and stale-listing risk into a recovery decision.
+          Stop guessing. Enter the economics and ResaleIQ turns margin, risk, and platform fit into one money decision.
         </p>
       </div>
 
@@ -73,7 +86,7 @@ export default function AnalyzePage() {
         >
           <div className="mb-5">
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">Item Intake</p>
-            <h3 className="mt-1 text-2xl font-extrabold text-ink">Recovery inputs</h3>
+            <h3 className="mt-1 text-2xl font-extrabold text-ink">Money inputs</h3>
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -102,17 +115,25 @@ export default function AnalyzePage() {
           </div>
 
           <button className="mt-6 w-full bg-[#070A18] text-white hover:bg-[#2B185F]" type="submit">
-            Run Decision Engine
+            Stop Losing Money on This Item
           </button>
         </form>
 
         <div className="space-y-4">
           {analysis ? (
             <>
+              <div className="rounded-2xl border border-[#29204E] bg-[#070A18] p-6 text-white shadow-xl">
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#7AF59A]">Final Money Decision</p>
+                <p className="mt-2 text-6xl font-black tracking-tight md:text-7xl">{decision}</p>
+                <p className="mt-3 text-sm font-semibold text-slate-300">
+                  Fix now: {analysis.deadListingRisk.recommendedAction} because {analysis.deadListingRisk.topIssue.toLowerCase()}.
+                </p>
+              </div>
+
               <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-                <ScoreCard title="Compliance" value={analysis.complianceScore} tone={analysis.complianceScore < 70 ? 'warning' : 'success'} />
+                <ScoreCard title="ROI" value={`${roi}%`} tone={roi < 50 ? 'danger' : 'success'} />
                 <ScoreCard title="Profit" value={analysis.profitScore} tone={analysis.profitScore < 50 ? 'danger' : 'success'} />
-                <ScoreCard title="Visibility" value={analysis.visibilityScore} tone="neutral" />
+                <ScoreCard title="Compliance" value={analysis.complianceScore} tone={analysis.complianceScore < 70 ? 'warning' : 'success'} />
                 <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Dead Risk</p>
                   <p className="mt-3 text-3xl font-extrabold text-ink">{analysis.deadListingRisk.riskScore}</p>
@@ -121,25 +142,25 @@ export default function AnalyzePage() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-3">
-                <ListingOutputCard label="Recommended price" value={`$${analysis.recommendedListingPrice.toFixed(2)}`} accent="sage" />
-                <ListingOutputCard label="Fast recovery price" value={`$${analysis.fastSalePrice.toFixed(2)}`} accent="clay" />
-                <ListingOutputCard label="Max value price" value={`$${analysis.maxValuePrice.toFixed(2)}`} accent="violet" />
+                <ListingOutputCard label="Recover at" value={`$${analysis.recommendedListingPrice.toFixed(2)}`} accent="sage" />
+                <ListingOutputCard label="Move fast at" value={`$${analysis.fastSalePrice.toFixed(2)}`} accent="clay" />
+                <ListingOutputCard label="Stretch target" value={`$${analysis.maxValuePrice.toFixed(2)}`} accent="violet" />
               </div>
 
               <div className="grid gap-4 xl:grid-cols-2">
-                <ListingOutputCard label="Best recovery channel" value={`${analysis.bestPlatform.platform}: ${analysis.bestPlatform.reason}`} accent="ink" />
-                <ListingOutputCard label="Primary decision" value={analysis.deadListingRisk.recommendedAction} accent="sage" />
+                <ListingOutputCard label="Best money channel" value={`${analysis.bestPlatform.platform}: ${analysis.bestPlatform.reason}`} accent="ink" />
+                <ListingOutputCard label="Fix now" value={analysis.deadListingRisk.recommendedAction} accent="sage" />
                 <RecommendationList title="Recovery moves" items={analysis.fixRecommendations} />
-                <ListingOutputCard label="Risk issue" value={analysis.deadListingRisk.topIssue} accent="clay" />
+                <ListingOutputCard label="Money blocker" value={analysis.deadListingRisk.topIssue} accent="clay" />
               </div>
             </>
           ) : (
             <div className="flex min-h-[420px] items-center rounded-2xl border border-dashed border-tan bg-white p-8 shadow-sm">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Awaiting item</p>
-                <h3 className="mt-3 text-3xl font-extrabold text-ink">Enter item economics to unlock a recovery decision.</h3>
+                <h3 className="mt-3 text-3xl font-extrabold text-ink">Enter item economics to get the money decision.</h3>
                 <p className="mt-4 max-w-xl text-sm leading-7 text-slate-600">
-                  The result will show compliance risk, profit quality, visibility, platform fit, and the next action for the item.
+                  The result will say SELL, HOLD, REPRICE, or LIQUIDATE, then show ROI, risk, price moves, and the fix-now action.
                 </p>
               </div>
             </div>
