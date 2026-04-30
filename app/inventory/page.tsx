@@ -21,6 +21,13 @@ type InventoryField = 'title' | 'price' | 'cost' | 'platform' | 'condition' | 's
 type Confidence = 'High' | 'Medium' | 'Low';
 type ColumnMap = Record<InventoryField, string>;
 type ConfidenceMap = Record<InventoryField, Confidence>;
+type ItemStatus = 'pending' | 'completed';
+type ItemStatusMap = Record<string, ItemStatus>;
+
+type WeeklySummary = {
+  itemsFixed: number;
+  estimatedProfitImpact: number;
+};
 
 type ColumnDetection = {
   column: string;
@@ -30,7 +37,9 @@ type ColumnDetection = {
 
 const MAX_IMPORT_ROWS = 100;
 const REQUIRED_FIELDS: InventoryField[] = ['title', 'price'];
-const FIXED_SESSION_KEY = 'resaleiq-fixed-inventory-items';
+const LEGACY_FIXED_SESSION_KEY = 'resaleiq-fixed-inventory-items';
+const ITEM_STATUS_SESSION_KEY = 'resaleiq-inventory-item-statuses';
+const WEEKLY_SUMMARY_KEY = 'resaleiq-weekly-summary';
 
 const INVENTORY_FIELDS: { key: InventoryField; label: string; required?: boolean }[] = [
   { key: 'title', label: 'Title', required: true },
@@ -355,24 +364,53 @@ export default function InventoryPage() {
   const [confidence, setConfidence] = useState<ConfidenceMap>(EMPTY_CONFIDENCE);
   const [showFieldEditor, setShowFieldEditor] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [fixedItemIds, setFixedItemIds] = useState<number[]>([]);
+  const [itemStatuses, setItemStatuses] = useState<ItemStatusMap>({});
+  const [weeklySummary, setWeeklySummary] = useState<WeeklySummary>({ itemsFixed: 0, estimatedProfitImpact: 0 });
+  const [confirmingItemId, setConfirmingItemId] = useState<number | null>(null);
   const [completionMessage, setCompletionMessage] = useState('');
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(FIXED_SESSION_KEY);
-    if (!saved) return;
+    const savedStatuses = window.localStorage.getItem(ITEM_STATUS_SESSION_KEY);
+    const savedLegacy = window.localStorage.getItem(LEGACY_FIXED_SESSION_KEY);
+    const savedSummary = window.localStorage.getItem(WEEKLY_SUMMARY_KEY);
 
     try {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) setFixedItemIds(parsed.filter((id) => Number.isFinite(id)));
+      if (savedStatuses) {
+        const parsed = JSON.parse(savedStatuses);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) setItemStatuses(parsed);
+      } else if (savedLegacy) {
+        const parsedLegacy = JSON.parse(savedLegacy);
+        if (Array.isArray(parsedLegacy)) {
+          setItemStatuses(parsedLegacy.reduce((current, id) => ({ ...current, [String(id)]: 'completed' as ItemStatus }), {}));
+        }
+      }
     } catch {
-      window.localStorage.removeItem(FIXED_SESSION_KEY);
+      window.localStorage.removeItem(ITEM_STATUS_SESSION_KEY);
+      window.localStorage.removeItem(LEGACY_FIXED_SESSION_KEY);
+    }
+
+    try {
+      if (savedSummary) {
+        const parsedSummary = JSON.parse(savedSummary);
+        if (parsedSummary && typeof parsedSummary === 'object') {
+          setWeeklySummary({
+            itemsFixed: Number(parsedSummary.itemsFixed) || 0,
+            estimatedProfitImpact: Number(parsedSummary.estimatedProfitImpact) || 0,
+          });
+        }
+      }
+    } catch {
+      window.localStorage.removeItem(WEEKLY_SUMMARY_KEY);
     }
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(FIXED_SESSION_KEY, JSON.stringify(fixedItemIds));
-  }, [fixedItemIds]);
+    window.localStorage.setItem(ITEM_STATUS_SESSION_KEY, JSON.stringify(itemStatuses));
+  }, [itemStatuses]);
+
+  useEffect(() => {
+    window.localStorage.setItem(WEEKLY_SUMMARY_KEY, JSON.stringify(weeklySummary));
+  }, [weeklySummary]);
 
   const mappingSummary = useMemo(() => summarizeRows(parsedRows, mapping), [parsedRows, mapping]);
   const itemSummary = useMemo(() => summarizeItems(items), [items]);
@@ -398,34 +436,69 @@ export default function InventoryPage() {
     if (b.fixed.improvement !== a.fixed.improvement) return b.fixed.improvement - a.fixed.improvement;
     return b.analysis.deadListingRisk.riskScore - a.analysis.deadListingRisk.riskScore;
   });
-  const fixedRows = prioritized.filter((row) => fixedItemIds.includes(row.item.id));
-  const remainingRows = prioritized.filter((row) => !fixedItemIds.includes(row.item.id));
-  const topItems = remainingRows.slice(0, 5);
+  const completedRows = prioritized.filter((row) => itemStatuses[String(row.item.id)] === 'completed');
+  const pendingRows = prioritized.filter((row) => itemStatuses[String(row.item.id)] === 'pending');
+  const activeRows = prioritized.filter((row) => !itemStatuses[String(row.item.id)]);
+  const topItems = activeRows.slice(0, 5);
   const totalRecoverable = prioritized.reduce((sum, row) => sum + row.fixed.improvement, 0);
-  const recoveredSoFar = fixedRows.reduce((sum, row) => sum + row.fixed.improvement, 0);
-  const remainingRecoverable = remainingRows.reduce((sum, row) => sum + row.fixed.improvement, 0);
+  const potentialRecovered = completedRows.reduce((sum, row) => sum + row.fixed.improvement, 0);
+  const pendingPotential = pendingRows.reduce((sum, row) => sum + row.fixed.improvement, 0);
+  const remainingRecoverable = [...activeRows, ...pendingRows].reduce((sum, row) => sum + row.fixed.improvement, 0);
   const totalInventoryValue = prioritized.reduce((sum, row) => sum + row.item.price, 0);
-  const fixNow = remainingRows.filter((row) => row.analysis.deadListingRisk.riskScore >= 30).length;
+  const fixNow = activeRows.filter((row) => row.analysis.deadListingRisk.riskScore >= 30).length;
   const averageRoi = Math.round(prioritized.reduce((sum, row) => sum + row.current.roi, 0) / Math.max(prioritized.length, 1));
-  const completedCount = fixedRows.length;
+  const completedCount = completedRows.length;
+  const pendingCount = pendingRows.length;
+  const activeCount = activeRows.length;
   const totalActionItems = prioritized.length;
   const canAdd = items.length < MAX_IMPORT_ROWS;
   const canRemove = items.length > 1;
 
   const resetProgress = () => {
-    setFixedItemIds([]);
+    setItemStatuses({});
+    setConfirmingItemId(null);
     setCompletionMessage('Session reset. Start with the highest-profit item.');
   };
 
   const clearProgressForInventoryChange = () => {
-    setFixedItemIds([]);
+    setItemStatuses({});
+    setConfirmingItemId(null);
     setCompletionMessage('');
   };
 
-  const markAsFixed = (id: number, improvement: number) => {
-    if (fixedItemIds.includes(id)) return;
-    setFixedItemIds((current) => [...current, id]);
-    setCompletionMessage(`Nice - you just recovered $${improvement.toFixed(0)} in profit.`);
+  const askAppliedConfirmation = (id: number) => {
+    setConfirmingItemId(id);
+  };
+
+  const completeAppliedFix = (id: number, improvement: number) => {
+    setItemStatuses((current) => ({ ...current, [String(id)]: 'completed' }));
+    setWeeklySummary((current) => ({
+      itemsFixed: current.itemsFixed + (itemStatuses[String(id)] === 'completed' ? 0 : 1),
+      estimatedProfitImpact: current.estimatedProfitImpact + (itemStatuses[String(id)] === 'completed' ? 0 : improvement),
+    }));
+    setConfirmingItemId(null);
+    setCompletionMessage(`Nice - $${improvement.toFixed(0)} potential recovered based on the fix you applied.`);
+  };
+
+  const moveToPending = (id: number) => {
+    setItemStatuses((current) => ({ ...current, [String(id)]: 'pending' }));
+    setConfirmingItemId(null);
+    setCompletionMessage('Saved to Pending Fixes. It will stay out of your active list until you apply it.');
+  };
+
+  const movePendingToActive = (id: number) => {
+    setItemStatuses((current) => {
+      const next = { ...current };
+      delete next[String(id)];
+      return next;
+    });
+    setCompletionMessage('Moved back to Active Fixes.');
+  };
+
+  const recheckItem = (id: number) => {
+    const row = rows.find((candidate) => candidate.item.id === id);
+    if (!row) return;
+    setCompletionMessage(`Re-check complete: projected ROI is ${row.fixed.roi}% after fix, with risk score ${row.analysis.deadListingRisk.riskScore}.`);
   };
 
   const updateItem = (id: number, key: keyof InventoryDraft, value: string | number) => {
@@ -770,8 +843,8 @@ export default function InventoryPage() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#7AF59A]">Recovery Session</p>
-                <h3 className="mt-2 text-3xl font-extrabold">You've fixed {completedCount} of {totalActionItems} items</h3>
-                <p className="mt-2 text-sm font-semibold text-slate-300">Fixed items stay completed in this browser so you can continue later.</p>
+                <h3 className="mt-2 text-3xl font-extrabold">You've completed {completedCount} of {totalActionItems} items</h3>
+                <p className="mt-2 text-sm font-semibold text-slate-300">Pending and completed statuses stay in this browser so you can continue later.</p>
               </div>
               <div className="flex flex-wrap gap-3">
                 <button type="button" onClick={resetProgress} className="bg-white text-ink">
@@ -779,10 +852,15 @@ export default function InventoryPage() {
                 </button>
               </div>
             </div>
-            <div className="mt-5 grid gap-4 md:grid-cols-3">
+            <div className="mt-5 grid gap-4 md:grid-cols-4">
               <div className="rounded-2xl border border-[#7AF59A]/25 bg-[#7AF59A]/10 p-5">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#7AF59A]">Recovered So Far</p>
-                <p className="mt-2 text-4xl font-black text-[#7AF59A]">${recoveredSoFar.toFixed(0)}</p>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#7AF59A]">Potential Recovered</p>
+                <p className="mt-2 text-4xl font-black text-[#7AF59A]">${potentialRecovered.toFixed(0)}</p>
+                <p className="mt-2 text-xs font-bold text-slate-300">Based on applied fixes</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-300">Pending Potential</p>
+                <p className="mt-2 text-4xl font-black">${pendingPotential.toFixed(0)}</p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-300">Remaining Recovery</p>
@@ -793,22 +871,27 @@ export default function InventoryPage() {
                 <p className="mt-2 text-4xl font-black">${totalRecoverable.toFixed(0)}</p>
               </div>
             </div>
+            <div className="mt-5 grid gap-3 md:grid-cols-3">
+              <div className="rounded-2xl bg-white/10 p-4 text-sm font-extrabold">Active: {activeCount}</div>
+              <div className="rounded-2xl bg-white/10 p-4 text-sm font-extrabold">Pending: {pendingCount}</div>
+              <div className="rounded-2xl bg-white/10 p-4 text-sm font-extrabold">Completed: {completedCount}</div>
+            </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-4">
-            <ScoreCard title="Total Recoverable" value={`+$${totalRecoverable.toFixed(0)}`} helper="Estimated profit improvement if listed fixes are executed." tone="success" />
-            <ScoreCard title="Inventory Value" value={`$${totalInventoryValue.toFixed(0)}`} helper="Current target resale value in this test set." tone="dark" />
-            <ScoreCard title="Fix Now Items" value={fixNow} helper="Items still waiting in this session." tone={fixNow ? 'danger' : 'neutral'} />
+            <ScoreCard title="Weekly Items Fixed" value={weeklySummary.itemsFixed} helper="Applied fixes saved in this browser." tone="success" />
+            <ScoreCard title="Weekly Profit Impact" value={`$${weeklySummary.estimatedProfitImpact.toFixed(0)}`} helper="Estimated potential recovered from applied fixes." tone="success" />
+            <ScoreCard title="Fix Now Items" value={fixNow} helper="Active items still waiting in this session." tone={fixNow ? 'danger' : 'neutral'} />
             <ScoreCard title="Current ROI" value={`${averageRoi}%`} helper="Average ROI before recovery fixes." tone={averageRoi < 50 ? 'warning' : 'success'} />
           </div>
 
           <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
             <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Prioritized Checklist</p>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Active Checklist</p>
                 <h3 className="mt-1 text-2xl font-extrabold text-ink">Top items to fix first</h3>
               </div>
-              <p className="text-sm font-bold text-slate-600">Mark each item fixed to move through the session</p>
+              <p className="text-sm font-bold text-slate-600">Apply the fix, then confirm what happened</p>
             </div>
 
             <div className="mt-5 space-y-4">
@@ -839,7 +922,7 @@ export default function InventoryPage() {
                       <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#7AF59A]">After Fix Outcome</p>
                       <p className="mt-2 text-sm font-bold">New price ${fixed.price.toFixed(0)}</p>
                       <p className="mt-1 text-sm font-bold">New ROI {fixed.roi}%</p>
-                      <p className="mt-2 text-xl font-extrabold text-[#7AF59A]">+${fixed.improvement.toFixed(0)} more profit</p>
+                      <p className="mt-2 text-xl font-extrabold text-[#7AF59A]">+${fixed.improvement.toFixed(0)} potential profit</p>
                     </div>
                     <div className="rounded-2xl bg-white p-4 text-sm font-bold leading-6 text-slate-700">
                       <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-slate-500">Why this is first</p>
@@ -856,29 +939,76 @@ export default function InventoryPage() {
                         Price inside ${band.low.toFixed(0)}-${band.high.toFixed(0)}, then {analysis.deadListingRisk.recommendedAction.toLowerCase()} before sourcing another item.
                       </p>
                     </div>
-                    <button type="button" onClick={() => markAsFixed(item.id, fixed.improvement)} className="bg-[#7AF59A] text-[#070A18]">
-                      Mark as Fixed
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => recheckItem(item.id)} className="bg-white text-ink">
+                        Re-check item
+                      </button>
+                      <button type="button" onClick={() => askAppliedConfirmation(item.id)} className="bg-[#7AF59A] text-[#070A18]">
+                        Mark as Fixed
+                      </button>
+                    </div>
                   </div>
+
+                  {confirmingItemId === item.id ? (
+                    <div className="mt-3 rounded-2xl border border-[#FFD36B]/60 bg-[#FFD36B]/10 p-4">
+                      <p className="text-sm font-extrabold text-ink">Did you apply this fix?</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button type="button" onClick={() => completeAppliedFix(item.id, fixed.improvement)} className="bg-[#070A18] text-white">
+                          Yes
+                        </button>
+                        <button type="button" onClick={() => moveToPending(item.id)} className="bg-white text-ink">
+                          Not yet
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               )) : (
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-emerald-950">
-                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">Session complete</p>
-                  <h4 className="mt-2 text-2xl font-extrabold">All items are fixed.</h4>
-                  <p className="mt-2 text-sm font-bold text-emerald-800">Reset the session or upload another batch when you are ready.</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">Active list complete</p>
+                  <h4 className="mt-2 text-2xl font-extrabold">No active fixes left.</h4>
+                  <p className="mt-2 text-sm font-bold text-emerald-800">Finish pending fixes, reset the session, or upload another batch.</p>
                 </div>
               )}
             </div>
           </div>
 
-          {fixedRows.length ? (
+          {pendingRows.length ? (
+            <div className="rounded-2xl border border-[#FFD36B]/50 bg-white p-6 shadow-sm">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#8A5A00]">Pending Fixes</p>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {pendingRows.map(({ item, fixed }) => (
+                  <div key={item.id} className="rounded-2xl border border-[#FFD36B]/60 bg-[#FFD36B]/10 p-4 text-ink">
+                    <p className="text-sm font-extrabold">{item.title}</p>
+                    <p className="mt-1 text-sm font-bold text-slate-700">${fixed.improvement.toFixed(0)} pending potential</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button type="button" onClick={() => completeAppliedFix(item.id, fixed.improvement)} className="bg-[#070A18] text-white">
+                        Applied Now
+                      </button>
+                      <button type="button" onClick={() => movePendingToActive(item.id)} className="bg-white text-ink">
+                        Move to Active
+                      </button>
+                      <button type="button" onClick={() => recheckItem(item.id)} className="bg-white text-ink">
+                        Re-check item
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {completedRows.length ? (
             <div className="rounded-2xl border border-emerald-200 bg-white p-6 shadow-sm">
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">Completed This Session</p>
               <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {fixedRows.map(({ item, fixed }) => (
+                {completedRows.map(({ item, fixed }) => (
                   <div key={item.id} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
                     <p className="text-sm font-extrabold">✓ {item.title}</p>
-                    <p className="mt-1 text-sm font-bold text-emerald-800">${fixed.improvement.toFixed(0)} recovered</p>
+                    <p className="mt-1 text-sm font-bold text-emerald-800">${fixed.improvement.toFixed(0)} potential recovered (based on applied fix)</p>
+                    <button type="button" onClick={() => recheckItem(item.id)} className="mt-3 bg-white text-ink">
+                      Re-check item
+                    </button>
                   </div>
                 ))}
               </div>
