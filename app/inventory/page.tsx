@@ -229,16 +229,10 @@ function cleanRows(rows: ParsedRow[], mapping: ColumnMap) {
     const platform = normalizePlatform(row[mapping.platform]);
     const condition = normalizeCondition(row[mapping.condition]) || 'condition missing';
 
-    if (!mapping.cost) warnings.push('Cost was not detected, so missing costs were treated as $0.');
-    if (!mapping.platform) warnings.push('Platform was not detected, so eBay was used as the default.');
-    if (!mapping.condition) warnings.push('Condition was not detected, so condition missing was used.');
-    if (!mapping.shipping) warnings.push('Shipping was not detected, so shipping was treated as $0.');
-
     return { id: index + 1, title, price, cost, platform, condition, shipping };
   });
 
   if (rows.length > MAX_IMPORT_ROWS) warnings.push(`This file has more than ${MAX_IMPORT_ROWS} rows, so the MVP imported the first ${MAX_IMPORT_ROWS}.`);
-  if (items.length < 5) warnings.push('This is a small sample. Results still run, but 5 or more rows will give a better daily picture.');
 
   return { items, warnings: Array.from(new Set(warnings)) };
 }
@@ -365,6 +359,7 @@ export default function InventoryPage() {
   const itemSummary = useMemo(() => summarizeItems(items), [items]);
   const requiredMappingMissing = REQUIRED_FIELDS.filter((field) => !mapping[field]);
   const canConfirmDetectedRows = parsedRows.length > 0 && requiredMappingMissing.length === 0;
+  const canRunDetectedAnalysis = mappingSummary.ready;
   const canAnalyzeItems = itemSummary.total > 0 && itemSummary.missingTitles === 0 && itemSummary.priceProblems === 0;
   const previewRows = parsedRows.slice(0, 5);
   const previewColumns = INVENTORY_FIELDS.map((field) => mapping[field.key]).filter(Boolean);
@@ -425,8 +420,6 @@ export default function InventoryPage() {
       const nextWarnings: string[] = [];
 
       if (!parsed.rows.length) nextWarnings.push('We could not find any inventory rows in this file.');
-      if (parsed.rows.length && detection.mapping.title) nextWarnings.push(`We detected "${detection.mapping.title}" as your title column. Confirm with the preview.`);
-      if (parsed.rows.length && detection.mapping.price) nextWarnings.push(`We detected "${detection.mapping.price}" as your price column. Confirm with the preview.`);
       if (parsed.rows.length && !detection.mapping.title) nextWarnings.push('We still need your title column. Open Adjust Fields if the preview shows it under a different name.');
       if (parsed.rows.length && !detection.mapping.price) nextWarnings.push('We still need your price column. Open Adjust Fields if the preview shows it under a different name.');
       if (parsed.rows.length > MAX_IMPORT_ROWS) nextWarnings.push(`This file has ${parsed.rows.length} rows. The MVP will use the first ${MAX_IMPORT_ROWS}.`);
@@ -444,16 +437,17 @@ export default function InventoryPage() {
     }
   };
 
-  const confirmDetectedRows = () => {
-    if (!canConfirmDetectedRows) {
-      setWarnings(['We need a title column and a price column before we can import your inventory.']);
+  const runDetectedAnalysis = () => {
+    if (!canRunDetectedAnalysis) {
+      setWarnings(['We need item titles and prices above $0 before recovery analysis can run.']);
       setShowFieldEditor(true);
+      setHasRun(false);
       return;
     }
     const cleaned = cleanRows(parsedRows, mapping);
     setItems(cleaned.items.length ? cleaned.items : STARTER_ITEMS);
     setWarnings(cleaned.warnings);
-    setHasRun(false);
+    setHasRun(true);
   };
 
   const runAnalysis = () => {
@@ -473,8 +467,8 @@ export default function InventoryPage() {
 
   const steps = [
     { label: 'Upload', complete: Boolean(parsedRows.length || items.length), active: !parsedRows.length },
-    { label: 'Confirm', complete: parsedRows.length > 0 && requiredMappingMissing.length === 0, active: parsedRows.length > 0 && !hasRun },
-    { label: 'Review', complete: canAnalyzeItems, active: !hasRun && canAnalyzeItems },
+    { label: 'Confirm', complete: canConfirmDetectedRows, active: parsedRows.length > 0 && !hasRun },
+    { label: 'Ready', complete: canAnalyzeItems, active: !hasRun && canAnalyzeItems },
     { label: 'Analyze', complete: hasRun, active: hasRun },
   ];
 
@@ -492,7 +486,7 @@ export default function InventoryPage() {
           <div className="rounded-2xl border border-[#7AF59A]/25 bg-[#7AF59A]/10 p-5">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#7AF59A]">Current test set</p>
             <p className="mt-2 text-5xl font-black text-[#7AF59A]">{items.length}</p>
-            <p className="mt-1 text-sm font-bold text-slate-200">items ready for review</p>
+            <p className="mt-1 text-sm font-bold text-slate-200">items ready to analyze</p>
           </div>
         </div>
       </div>
@@ -534,41 +528,54 @@ export default function InventoryPage() {
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Confirm Your Inventory Data</p>
-              <h3 className="mt-1 text-2xl font-extrabold text-ink">Does this look correct?</h3>
+              <h3 className="mt-1 text-2xl font-extrabold text-ink">{canRunDetectedAnalysis ? 'This looks good - you are ready to analyze' : 'Upload inventory to begin'}</h3>
             </div>
             <div className="flex flex-wrap gap-3">
               <button type="button" onClick={() => setShowFieldEditor((value) => !value)} disabled={!columns.length} className="bg-ivory text-ink disabled:opacity-40">
                 Adjust Fields
               </button>
-              <button type="button" onClick={confirmDetectedRows} disabled={!canConfirmDetectedRows} className="bg-[#070A18] text-white hover:bg-[#2B185F] disabled:opacity-40">
-                Yes, Review These Items
+              <button type="button" onClick={runDetectedAnalysis} disabled={!canRunDetectedAnalysis} className="bg-[#070A18] px-6 py-4 text-base font-extrabold text-white hover:bg-[#2B185F] disabled:opacity-40">
+                Run Recovery Analysis
               </button>
             </div>
           </div>
 
           {columns.length ? (
             <>
+              {canRunDetectedAnalysis ? (
+                <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-emerald-950">
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">Inventory detected</p>
+                  <h4 className="mt-2 text-2xl font-extrabold">We've successfully read your inventory.</h4>
+                  <p className="mt-2 text-sm font-bold text-emerald-800">This looks good - you're ready to analyze.</p>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-2xl bg-white p-4 text-sm font-extrabold text-emerald-900">✓ Inventory detected</div>
+                    <div className="rounded-2xl bg-white p-4 text-sm font-extrabold text-emerald-900">✓ Prices found</div>
+                    <div className="rounded-2xl bg-white p-4 text-sm font-extrabold text-emerald-900">✓ Titles found</div>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="mt-5 grid gap-3 md:grid-cols-3">
                 {INVENTORY_FIELDS.map((field) => {
                   const detected = mapping[field.key];
                   const requiredMissing = Boolean(field.required && !detected);
-                  const needsReview = Boolean(detected && confidence[field.key] !== 'High');
+                  const needsAttention = Boolean(detected && confidence[field.key] !== 'High');
                   const cardClass = requiredMissing
                     ? 'border border-red-200 bg-red-50 text-red-800'
-                    : needsReview
+                    : needsAttention
                       ? 'border border-[#FFD36B]/60 bg-[#FFD36B]/10 text-[#6F4A00]'
-                      : 'border border-tan bg-ivory text-slate-700';
+                      : 'border border-emerald-200 bg-emerald-50 text-emerald-950';
                   const detectedMessage = detected
-                    ? `We detected this as your ${field.label.toLowerCase()} column: ${detected}`
+                    ? `Ready: ${detected}`
                     : field.required
                       ? `We still need your ${field.label.toLowerCase()} column`
-                      : 'Not detected, optional';
+                      : 'Optional field not detected';
 
                   return (
                     <div key={field.key} className={`rounded-2xl p-4 ${cardClass}`}>
                       <p className="text-xs font-extrabold uppercase tracking-[0.16em] opacity-70">{field.label}</p>
                       <p className="mt-2 text-sm font-extrabold">{detectedMessage}</p>
-                      <p className="mt-2 text-xs font-bold">Confidence: {detected ? confidence[field.key] : 'Low'}{needsReview ? ' - review preview' : ''}</p>
+                      <p className="mt-2 text-xs font-bold">Confidence: {detected ? confidence[field.key] : 'Low'}{needsAttention ? ' - matched from preview' : ''}</p>
                     </div>
                   );
                 })}
@@ -624,7 +631,7 @@ export default function InventoryPage() {
             </>
           ) : (
             <div className="mt-5 rounded-2xl border border-dashed border-tan bg-ivory p-6 text-sm font-bold leading-6 text-slate-600">
-              Upload a file and ResaleIQ will detect the useful columns automatically. You will only adjust fields if the preview looks wrong.
+              Upload a file and ResaleIQ will detect the useful columns automatically. You only adjust fields if a required column is missing.
             </div>
           )}
         </div>
@@ -632,7 +639,7 @@ export default function InventoryPage() {
 
       {warnings.length || requiredMappingMissing.length || mappingSummary.priceProblems || mappingSummary.missingTitles ? (
         <div className={`rounded-2xl border p-5 ${requiredMappingMissing.length ? 'border-red-200 bg-red-50' : 'border-[#FFD36B]/50 bg-[#FFD36B]/10'}`}>
-          <p className={`text-xs font-bold uppercase tracking-[0.2em] ${requiredMappingMissing.length ? 'text-red-800' : 'text-[#8A5A00]'}`}>{requiredMappingMissing.length ? 'Missing required data' : 'Review before importing'}</p>
+          <p className={`text-xs font-bold uppercase tracking-[0.2em] ${requiredMappingMissing.length ? 'text-red-800' : 'text-[#8A5A00]'}`}>{requiredMappingMissing.length ? 'Missing required data' : 'Ready with notes'}</p>
           <ul className="mt-3 space-y-2 text-sm font-bold text-slate-700">
             {mappingSummary.missingTitles && mapping.title ? <li>- Some rows are missing item titles.</li> : null}
             {mappingSummary.priceProblems && mapping.price ? <li>- Some rows need a usable price above $0.</li> : null}
@@ -644,15 +651,15 @@ export default function InventoryPage() {
       <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">Review</p>
-            <h3 className="mt-1 text-2xl font-extrabold text-ink">Confirm inventory before analysis</h3>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">Ready Inventory</p>
+            <h3 className="mt-1 text-2xl font-extrabold text-ink">Inventory staged for recovery analysis</h3>
           </div>
           <div className="flex flex-wrap gap-3">
             <button type="button" onClick={addItem} disabled={!canAdd} className="bg-ivory text-ink disabled:opacity-40">
               Add Item
             </button>
             <button type="button" onClick={runAnalysis} disabled={!canAnalyzeItems} className="bg-[#070A18] text-white hover:bg-[#2B185F] disabled:opacity-40">
-              {canAnalyzeItems ? 'Run Full Recovery Analysis' : 'Fix Required Fields First'}
+              {canAnalyzeItems ? 'Run Recovery Analysis' : 'Fix Required Fields First'}
             </button>
           </div>
         </div>
@@ -774,9 +781,9 @@ export default function InventoryPage() {
       ) : (
         <div className="rounded-2xl border border-dashed border-tan bg-white p-8 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Ready When You Are</p>
-          <h3 className="mt-3 text-3xl font-extrabold text-ink">Upload, confirm, review, then run the recovery analysis.</h3>
+          <h3 className="mt-3 text-3xl font-extrabold text-ink">Upload, confirm, then run the recovery analysis.</h3>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600">
-            ResaleIQ detects likely columns first. Non-technical sellers only adjust fields when the preview does not look right.
+            ResaleIQ detects likely columns first. Once titles and prices are found, the next step is recovery analysis.
           </p>
         </div>
       )}
