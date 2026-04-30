@@ -54,8 +54,40 @@ function finalDecision(action: string) {
   return 'SELL';
 }
 
-function estimatedRoi(input: ListingInput) {
-  return Math.round(((input.targetSalePrice - input.purchaseCost - input.shippingPaid) / Math.max(input.purchaseCost, 1)) * 100);
+function baseProfit(input: ListingInput, price: number) {
+  return price + input.shippingCharged - input.purchaseCost - input.shippingPaid;
+}
+
+function currentOutcome(input: ListingInput, riskScore: number) {
+  const riskDiscount = Math.min(0.3, riskScore * 0.003);
+  const price = input.targetSalePrice * (1 - riskDiscount);
+  const profit = baseProfit(input, price);
+  return {
+    price,
+    profit,
+    roi: Math.round((profit / Math.max(input.purchaseCost, 1)) * 100),
+  };
+}
+
+function fixedOutcome(input: ListingInput, action: string, riskScore: number) {
+  const current = currentOutcome(input, riskScore);
+  const liftByAction: Record<string, number> = {
+    Relist: 0.08,
+    Reprice: 0.06,
+    Crosslist: 0.1,
+    Bundle: 0.12,
+    Hold: 0.03,
+    'Donate/Liquidate': 0.04,
+  };
+  const lift = liftByAction[action] ?? 0.06;
+  const price = Math.min(input.targetSalePrice * 1.12, current.price + input.targetSalePrice * lift);
+  const profit = baseProfit(input, price);
+  return {
+    price,
+    profit,
+    roi: Math.round((profit / Math.max(input.purchaseCost, 1)) * 100),
+    improvement: Math.max(0, profit - current.profit),
+  };
 }
 
 export default function AnalyzePage() {
@@ -64,7 +96,8 @@ export default function AnalyzePage() {
 
   const update = (key: keyof ListingInput, value: string | number | boolean) => setForm((p) => ({ ...p, [key]: value }));
   const decision = analysis ? finalDecision(analysis.deadListingRisk.recommendedAction) : null;
-  const roi = estimatedRoi(form);
+  const current = analysis ? currentOutcome(form, analysis.deadListingRisk.riskScore) : null;
+  const fixed = analysis ? fixedOutcome(form, analysis.deadListingRisk.recommendedAction, analysis.deadListingRisk.riskScore) : null;
 
   return (
     <section className="space-y-8">
@@ -120,18 +153,34 @@ export default function AnalyzePage() {
         </form>
 
         <div className="space-y-4">
-          {analysis ? (
+          {analysis && current && fixed ? (
             <>
               <div className="rounded-2xl border border-[#29204E] bg-[#070A18] p-6 text-white shadow-xl">
                 <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#7AF59A]">Final Money Decision</p>
                 <p className="mt-2 text-6xl font-black tracking-tight md:text-7xl">{decision}</p>
+                <p className="mt-3 text-3xl font-extrabold text-[#7AF59A]">+${fixed.improvement.toFixed(0)} more profit if you fix this</p>
                 <p className="mt-3 text-sm font-semibold text-slate-300">
                   Fix now: {analysis.deadListingRisk.recommendedAction} because {analysis.deadListingRisk.topIssue.toLowerCase()}.
                 </p>
               </div>
 
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Current Outcome</p>
+                  <p className="mt-3 text-2xl font-extrabold text-ink">Price ${current.price.toFixed(0)}</p>
+                  <p className="mt-2 text-sm font-bold text-slate-700">ROI {current.roi}%</p>
+                  <p className="mt-2 text-sm font-bold text-red-700">Risk {analysis.deadListingRisk.riskScore}</p>
+                </div>
+                <div className="rounded-2xl border border-[#070A18] bg-[#070A18] p-6 text-white shadow-sm">
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#7AF59A]">After Fix Outcome</p>
+                  <p className="mt-3 text-2xl font-extrabold">New price ${fixed.price.toFixed(0)}</p>
+                  <p className="mt-2 text-sm font-bold">New ROI {fixed.roi}%</p>
+                  <p className="mt-2 text-xl font-extrabold text-[#7AF59A]">+${fixed.improvement.toFixed(0)} profit gap</p>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-                <ScoreCard title="ROI" value={`${roi}%`} tone={roi < 50 ? 'danger' : 'success'} />
+                <ScoreCard title="New ROI" value={`${fixed.roi}%`} tone={fixed.roi < 50 ? 'danger' : 'success'} />
                 <ScoreCard title="Profit" value={analysis.profitScore} tone={analysis.profitScore < 50 ? 'danger' : 'success'} />
                 <ScoreCard title="Compliance" value={analysis.complianceScore} tone={analysis.complianceScore < 70 ? 'warning' : 'success'} />
                 <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
@@ -139,12 +188,6 @@ export default function AnalyzePage() {
                   <p className="mt-3 text-3xl font-extrabold text-ink">{analysis.deadListingRisk.riskScore}</p>
                   <div className="mt-3"><RiskBadge level={analysis.deadListingRisk.riskLevel} /></div>
                 </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-3">
-                <ListingOutputCard label="Recover at" value={`$${analysis.recommendedListingPrice.toFixed(2)}`} accent="sage" />
-                <ListingOutputCard label="Move fast at" value={`$${analysis.fastSalePrice.toFixed(2)}`} accent="clay" />
-                <ListingOutputCard label="Stretch target" value={`$${analysis.maxValuePrice.toFixed(2)}`} accent="violet" />
               </div>
 
               <div className="grid gap-4 xl:grid-cols-2">
@@ -160,7 +203,7 @@ export default function AnalyzePage() {
                 <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Awaiting item</p>
                 <h3 className="mt-3 text-3xl font-extrabold text-ink">Enter item economics to get the money decision.</h3>
                 <p className="mt-4 max-w-xl text-sm leading-7 text-slate-600">
-                  The result will say SELL, HOLD, REPRICE, or LIQUIDATE, then show ROI, risk, price moves, and the fix-now action.
+                  The result will show current outcome, after-fix outcome, profit increase, and the unavoidable next action.
                 </p>
               </div>
             </div>
