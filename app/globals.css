@@ -6,16 +6,31 @@
   color-scheme: light;
 }
 
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
 body {
-  @apply bg-ivory text-ink;
+  @apply min-h-screen bg-ivory text-ink antialiased;
+  background:
+    radial-gradient(circle at top left, rgba(124, 92, 255, 0.12), transparent 32rem),
+    linear-gradient(180deg, #fbfaf6 0%, #f3eee4 100%);
 }
 
 input,
 select,
 textarea {
-  @apply w-full rounded-lg border border-tan bg-white px-3 py-2 text-sm shadow-sm focus:border-sage focus:outline-none;
+  @apply w-full rounded-2xl border border-tan bg-white px-4 py-3 text-sm font-medium text-ink shadow-sm transition focus:border-sage focus:outline-none focus:ring-4 focus:ring-sage/10;
 }
 
 button {
-  @apply rounded-lg px-4 py-2 font-medium;
+  @apply rounded-2xl px-5 py-3 font-bold transition;
+}
+
+a {
+  @apply transition;
 }
