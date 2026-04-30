@@ -1,6 +1,6 @@
 'use client';
 
-import { type DragEvent, useMemo, useState } from 'react';
+import { type DragEvent, useEffect, useMemo, useState } from 'react';
 import { RiskBadge } from '@/components/RiskBadge';
 import { ScoreCard } from '@/components/ScoreCard';
 import { analyzeListing } from '@/lib/listingGenerator';
@@ -30,6 +30,7 @@ type ColumnDetection = {
 
 const MAX_IMPORT_ROWS = 100;
 const REQUIRED_FIELDS: InventoryField[] = ['title', 'price'];
+const FIXED_SESSION_KEY = 'resaleiq-fixed-inventory-items';
 
 const INVENTORY_FIELDS: { key: InventoryField; label: string; required?: boolean }[] = [
   { key: 'title', label: 'Title', required: true },
@@ -354,6 +355,24 @@ export default function InventoryPage() {
   const [confidence, setConfidence] = useState<ConfidenceMap>(EMPTY_CONFIDENCE);
   const [showFieldEditor, setShowFieldEditor] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [fixedItemIds, setFixedItemIds] = useState<number[]>([]);
+  const [completionMessage, setCompletionMessage] = useState('');
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem(FIXED_SESSION_KEY);
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) setFixedItemIds(parsed.filter((id) => Number.isFinite(id)));
+    } catch {
+      window.localStorage.removeItem(FIXED_SESSION_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(FIXED_SESSION_KEY, JSON.stringify(fixedItemIds));
+  }, [fixedItemIds]);
 
   const mappingSummary = useMemo(() => summarizeRows(parsedRows, mapping), [parsedRows, mapping]);
   const itemSummary = useMemo(() => summarizeItems(items), [items]);
@@ -379,16 +398,39 @@ export default function InventoryPage() {
     if (b.fixed.improvement !== a.fixed.improvement) return b.fixed.improvement - a.fixed.improvement;
     return b.analysis.deadListingRisk.riskScore - a.analysis.deadListingRisk.riskScore;
   });
-  const topItems = prioritized.slice(0, 5);
+  const fixedRows = prioritized.filter((row) => fixedItemIds.includes(row.item.id));
+  const remainingRows = prioritized.filter((row) => !fixedItemIds.includes(row.item.id));
+  const topItems = remainingRows.slice(0, 5);
   const totalRecoverable = prioritized.reduce((sum, row) => sum + row.fixed.improvement, 0);
+  const recoveredSoFar = fixedRows.reduce((sum, row) => sum + row.fixed.improvement, 0);
+  const remainingRecoverable = remainingRows.reduce((sum, row) => sum + row.fixed.improvement, 0);
   const totalInventoryValue = prioritized.reduce((sum, row) => sum + row.item.price, 0);
-  const fixNow = prioritized.filter((row) => row.analysis.deadListingRisk.riskScore >= 30).length;
+  const fixNow = remainingRows.filter((row) => row.analysis.deadListingRisk.riskScore >= 30).length;
   const averageRoi = Math.round(prioritized.reduce((sum, row) => sum + row.current.roi, 0) / Math.max(prioritized.length, 1));
+  const completedCount = fixedRows.length;
+  const totalActionItems = prioritized.length;
   const canAdd = items.length < MAX_IMPORT_ROWS;
   const canRemove = items.length > 1;
 
+  const resetProgress = () => {
+    setFixedItemIds([]);
+    setCompletionMessage('Session reset. Start with the highest-profit item.');
+  };
+
+  const clearProgressForInventoryChange = () => {
+    setFixedItemIds([]);
+    setCompletionMessage('');
+  };
+
+  const markAsFixed = (id: number, improvement: number) => {
+    if (fixedItemIds.includes(id)) return;
+    setFixedItemIds((current) => [...current, id]);
+    setCompletionMessage(`Nice - you just recovered $${improvement.toFixed(0)} in profit.`);
+  };
+
   const updateItem = (id: number, key: keyof InventoryDraft, value: string | number) => {
     setItems((current) => current.map((item) => (item.id === id ? { ...item, [key]: value } : item)));
+    clearProgressForInventoryChange();
     setHasRun(false);
   };
 
@@ -399,12 +441,14 @@ export default function InventoryPage() {
       ...current,
       { id: nextId, title: '', price: 0, cost: 0, platform: 'eBay', condition: '', shipping: 0 },
     ]);
+    clearProgressForInventoryChange();
     setHasRun(false);
   };
 
   const removeItem = (id: number) => {
     if (!canRemove) return;
     setItems((current) => current.filter((item) => item.id !== id));
+    clearProgressForInventoryChange();
     setHasRun(false);
   };
 
@@ -414,6 +458,7 @@ export default function InventoryPage() {
     setWarnings([]);
     setHasRun(false);
     setShowFieldEditor(false);
+    clearProgressForInventoryChange();
     try {
       const parsed = await parseInventoryFile(file);
       const detection = inferMapping(parsed.columns, parsed.rows);
@@ -447,6 +492,7 @@ export default function InventoryPage() {
     const cleaned = cleanRows(parsedRows, mapping);
     setItems(cleaned.items.length ? cleaned.items : STARTER_ITEMS);
     setWarnings(cleaned.warnings);
+    clearProgressForInventoryChange();
     setHasRun(true);
   };
 
@@ -713,24 +759,60 @@ export default function InventoryPage() {
 
       {hasRun ? (
         <>
+          {completionMessage ? (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-emerald-950">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">Progress saved</p>
+              <h3 className="mt-2 text-2xl font-extrabold">{completionMessage}</h3>
+            </div>
+          ) : null}
+
+          <div className="rounded-2xl border border-[#29204E] bg-[#070A18] p-6 text-white shadow-xl">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#7AF59A]">Recovery Session</p>
+                <h3 className="mt-2 text-3xl font-extrabold">You've fixed {completedCount} of {totalActionItems} items</h3>
+                <p className="mt-2 text-sm font-semibold text-slate-300">Fixed items stay completed in this browser so you can continue later.</p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button type="button" onClick={resetProgress} className="bg-white text-ink">
+                  Reset Session
+                </button>
+              </div>
+            </div>
+            <div className="mt-5 grid gap-4 md:grid-cols-3">
+              <div className="rounded-2xl border border-[#7AF59A]/25 bg-[#7AF59A]/10 p-5">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#7AF59A]">Recovered So Far</p>
+                <p className="mt-2 text-4xl font-black text-[#7AF59A]">${recoveredSoFar.toFixed(0)}</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-300">Remaining Recovery</p>
+                <p className="mt-2 text-4xl font-black">${remainingRecoverable.toFixed(0)}</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-300">Session Potential</p>
+                <p className="mt-2 text-4xl font-black">${totalRecoverable.toFixed(0)}</p>
+              </div>
+            </div>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-4">
             <ScoreCard title="Total Recoverable" value={`+$${totalRecoverable.toFixed(0)}`} helper="Estimated profit improvement if listed fixes are executed." tone="success" />
             <ScoreCard title="Inventory Value" value={`$${totalInventoryValue.toFixed(0)}`} helper="Current target resale value in this test set." tone="dark" />
-            <ScoreCard title="Fix Now Items" value={fixNow} helper="Items above the action threshold in this batch." tone={fixNow ? 'danger' : 'neutral'} />
+            <ScoreCard title="Fix Now Items" value={fixNow} helper="Items still waiting in this session." tone={fixNow ? 'danger' : 'neutral'} />
             <ScoreCard title="Current ROI" value={`${averageRoi}%`} helper="Average ROI before recovery fixes." tone={averageRoi < 50 ? 'warning' : 'success'} />
           </div>
 
           <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
             <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Prioritized List</p>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Prioritized Checklist</p>
                 <h3 className="mt-1 text-2xl font-extrabold text-ink">Top items to fix first</h3>
               </div>
-              <p className="text-sm font-bold text-slate-600">Sorted by profit recovery, then risk</p>
+              <p className="text-sm font-bold text-slate-600">Mark each item fixed to move through the session</p>
             </div>
 
             <div className="mt-5 space-y-4">
-              {topItems.map(({ item, input, analysis, current, fixed, band }, index) => (
+              {topItems.length ? topItems.map(({ item, input, analysis, current, fixed, band }, index) => (
                 <div key={item.id} className="rounded-2xl border border-tan/80 bg-ivory p-5">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div>
@@ -766,17 +848,42 @@ export default function InventoryPage() {
                     </div>
                   </div>
 
-                  <div className="mt-3 rounded-2xl bg-[#070A18] p-4 text-white">
-                    <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#7AF59A]">Daily action</p>
-                    <p className="mt-2 text-lg font-extrabold">Use title: {optimizedTitle(input)}</p>
-                    <p className="mt-2 text-sm font-semibold text-slate-200">
-                      Price inside ${band.low.toFixed(0)}-${band.high.toFixed(0)}, then {analysis.deadListingRisk.recommendedAction.toLowerCase()} before sourcing another item.
-                    </p>
+                  <div className="mt-3 flex flex-col gap-3 rounded-2xl bg-[#070A18] p-4 text-white lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                      <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#7AF59A]">Daily action</p>
+                      <p className="mt-2 text-lg font-extrabold">Use title: {optimizedTitle(input)}</p>
+                      <p className="mt-2 text-sm font-semibold text-slate-200">
+                        Price inside ${band.low.toFixed(0)}-${band.high.toFixed(0)}, then {analysis.deadListingRisk.recommendedAction.toLowerCase()} before sourcing another item.
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => markAsFixed(item.id, fixed.improvement)} className="bg-[#7AF59A] text-[#070A18]">
+                      Mark as Fixed
+                    </button>
                   </div>
                 </div>
-              ))}
+              )) : (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-emerald-950">
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">Session complete</p>
+                  <h4 className="mt-2 text-2xl font-extrabold">All items are fixed.</h4>
+                  <p className="mt-2 text-sm font-bold text-emerald-800">Reset the session or upload another batch when you are ready.</p>
+                </div>
+              )}
             </div>
           </div>
+
+          {fixedRows.length ? (
+            <div className="rounded-2xl border border-emerald-200 bg-white p-6 shadow-sm">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">Completed This Session</p>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {fixedRows.map(({ item, fixed }) => (
+                  <div key={item.id} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+                    <p className="text-sm font-extrabold">✓ {item.title}</p>
+                    <p className="mt-1 text-sm font-bold text-emerald-800">${fixed.improvement.toFixed(0)} recovered</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </>
       ) : (
         <div className="rounded-2xl border border-dashed border-tan bg-white p-8 shadow-sm">
