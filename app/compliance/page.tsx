@@ -6,6 +6,8 @@ import { RecommendationList } from '@/components/RecommendationList';
 import { evaluateCompliance } from '@/lib/compliance';
 import { ComplianceResult } from '@/lib/types';
 
+const FIELD_NAMES = ['title', 'brand', 'category', 'condition', 'size', 'color', 'material'] as const;
+
 export default function CompliancePage() {
   const [input, setInput] = useState({
     title: '',
@@ -21,51 +23,75 @@ export default function CompliancePage() {
   const [result, setResult] = useState<ComplianceResult | null>(null);
 
   return (
-    <section className="space-y-4">
-      <h2 className="text-xl font-semibold">Compliance Checker</h2>
-      <form
-        className="grid grid-cols-1 gap-3 rounded-xl border border-tan bg-white p-4 md:grid-cols-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setResult(evaluateCompliance(input));
-        }}
-      >
-        {['title', 'brand', 'category', 'condition', 'size', 'color', 'material'].map((field) => (
-          <label key={field} className="text-sm capitalize">
-            {field}
-            <input value={input[field as keyof typeof input] as string} onChange={(e) => setInput((p) => ({ ...p, [field]: e.target.value }))} />
-          </label>
-        ))}
+    <section className="space-y-8">
+      <div className="rounded-2xl border border-[#29204E] bg-[#070A18] p-6 text-white shadow-xl md:p-8">
+        <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#C59BFF]">Compliance</p>
+        <h2 className="mt-3 text-4xl font-extrabold tracking-tight md:text-5xl">Reduce takedown risk before recovery work begins.</h2>
+        <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
+          Compliance checks are part of the recovery system: missing condition, size, material, safety, or grading data can bury inventory before price changes help.
+        </p>
+      </div>
 
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={input.safetyDocs} onChange={(e) => setInput((p) => ({ ...p, safetyDocs: e.target.checked }))} />
-          Safety docs available
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={input.gradingDescriptors}
-            onChange={(e) => setInput((p) => ({ ...p, gradingDescriptors: e.target.checked }))}
-          />
-          Grading descriptors included
-        </label>
-
-        <button className="bg-sage text-white md:col-span-2">Check Compliance</button>
-      </form>
-
-      {result ? (
-        <div className="rounded-xl border border-tan bg-white p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-lg font-semibold">Compliance Score: {result.complianceScore}</p>
-            <RiskBadge level={result.riskLevel} />
+      <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
+        <form
+          className="rounded-2xl border border-tan bg-white p-6 shadow-sm"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setResult(evaluateCompliance(input));
+          }}
+        >
+          <div className="mb-5">
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">Listing Metadata</p>
+            <h3 className="mt-1 text-2xl font-extrabold text-ink">Compliance inputs</h3>
           </div>
-          <p className="text-sm text-slate-600">{result.explanation}</p>
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-            <RecommendationList title="Missing fields" items={result.missingFields.length ? result.missingFields : ['None']} />
-            <RecommendationList title="Required fixes" items={result.requiredFixes.length ? result.requiredFixes : ['No required fixes']} />
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {FIELD_NAMES.map((field) => (
+              <label key={field} className="text-sm font-bold capitalize text-slate-700">
+                {field}
+                <input value={input[field]} onChange={(e) => setInput((p) => ({ ...p, [field]: e.target.value }))} />
+              </label>
+            ))}
           </div>
-        </div>
-      ) : null}
+
+          <div className="mt-5 grid gap-3 md:grid-cols-2">
+            <label className="flex items-center gap-3 rounded-2xl bg-ivory px-4 py-3 text-sm font-bold text-slate-700">
+              <input type="checkbox" checked={input.safetyDocs} onChange={(e) => setInput((p) => ({ ...p, safetyDocs: e.target.checked }))} />
+              Safety docs available
+            </label>
+            <label className="flex items-center gap-3 rounded-2xl bg-ivory px-4 py-3 text-sm font-bold text-slate-700">
+              <input type="checkbox" checked={input.gradingDescriptors} onChange={(e) => setInput((p) => ({ ...p, gradingDescriptors: e.target.checked }))} />
+              Grading descriptors included
+            </label>
+          </div>
+
+          <button className="mt-6 w-full bg-sage text-white hover:bg-[#4d654f]">Check Compliance</button>
+        </form>
+
+        {result ? (
+          <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Compliance Score</p>
+                <p className="mt-2 text-5xl font-extrabold text-ink">{result.complianceScore}</p>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">{result.explanation}</p>
+              </div>
+              <RiskBadge level={result.riskLevel} />
+            </div>
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              <RecommendationList title="Missing fields" items={result.missingFields.length ? result.missingFields : ['None']} />
+              <RecommendationList title="Required fixes" items={result.requiredFixes.length ? result.requiredFixes : ['No required fixes']} />
+            </div>
+          </div>
+        ) : (
+          <div className="flex min-h-[360px] items-center rounded-2xl border border-dashed border-tan bg-white p-8 shadow-sm">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Ready</p>
+              <h3 className="mt-3 text-3xl font-extrabold text-ink">Run the metadata check before deciding what to recover.</h3>
+              <p className="mt-4 text-sm leading-7 text-slate-600">The result will separate harmless gaps from issues that can suppress visibility or create marketplace risk.</p>
+            </div>
+          </div>
+        )}
+      </div>
     </section>
   );
 }
