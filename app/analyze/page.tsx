@@ -27,26 +27,6 @@ const INITIAL: ListingInput = {
   gradingDescriptors: false,
 };
 
-const TEXT_FIELDS: [keyof ListingInput, string][] = [
-  ['title', 'Item title'],
-  ['brand', 'Brand'],
-  ['category', 'Category'],
-  ['condition', 'Condition'],
-  ['size', 'Size'],
-  ['color', 'Color'],
-  ['material', 'Material'],
-  ['platform', 'Current platform'],
-  ['notes', 'Risk notes'],
-];
-
-const NUMBER_FIELDS: [keyof ListingInput, string][] = [
-  ['purchaseCost', 'Purchase cost'],
-  ['targetSalePrice', 'Target sale price'],
-  ['shippingPaid', 'Shipping paid'],
-  ['shippingCharged', 'Shipping charged'],
-  ['listingAgeDays', 'Days listed'],
-];
-
 function finalDecision(action: string) {
   if (action === 'Donate/Liquidate') return 'LIQUIDATE';
   if (action === 'Reprice') return 'REPRICE';
@@ -112,7 +92,7 @@ function moneyExplanation(input: ListingInput, action: string, riskScore: number
 }
 
 function optimizedTitle(input: ListingInput) {
-  return [input.brand, input.title, input.size && input.size !== 'OS' ? input.size : '', input.color]
+  return [input.brand, input.title, input.condition]
     .filter(Boolean)
     .join(' ')
     .replace(/\s+/g, ' ')
@@ -127,11 +107,16 @@ function keyChanges(input: ListingInput, action: string, signals: ReturnType<typ
   ];
 }
 
+function titleBrand(title: string) {
+  return title.trim().split(/\s+/)[0] || '';
+}
+
 export default function AnalyzePage() {
   const [form, setForm] = useState<ListingInput>(INITIAL);
   const [analysis, setAnalysis] = useState<ListingAnalysis | null>(null);
 
   const update = (key: keyof ListingInput, value: string | number | boolean) => setForm((p) => ({ ...p, [key]: value }));
+  const updateTitle = (value: string) => setForm((p) => ({ ...p, title: value, brand: titleBrand(value) }));
   const decision = analysis ? finalDecision(analysis.deadListingRisk.recommendedAction) : null;
   const current = analysis ? currentOutcome(form, analysis.deadListingRisk.riskScore) : null;
   const fixed = analysis ? fixedOutcome(form, analysis.deadListingRisk.recommendedAction, analysis.deadListingRisk.riskScore) : null;
@@ -141,9 +126,9 @@ export default function AnalyzePage() {
     <section className="space-y-8">
       <div className="rounded-2xl border border-[#29204E] bg-[#070A18] p-6 text-white shadow-xl md:p-8">
         <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#C59BFF]">Decision Engine</p>
-        <h2 className="mt-3 text-4xl font-extrabold tracking-tight md:text-5xl">Decide whether this item should SELL, HOLD, REPRICE, or LIQUIDATE.</h2>
+        <h2 className="mt-3 text-4xl font-extrabold tracking-tight md:text-5xl">Tell us what's happening with this item.</h2>
         <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-          Stop guessing. Enter the economics and ResaleIQ turns margin, risk, market signals, and platform fit into one money decision.
+          Enter the handful of details a reseller already knows. ResaleIQ turns price, cost, age, shipping, and platform fit into one money decision.
         </p>
       </div>
 
@@ -156,32 +141,43 @@ export default function AnalyzePage() {
           className="rounded-2xl border border-tan bg-white p-6 shadow-sm"
         >
           <div className="mb-5">
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">Item Intake</p>
-            <h3 className="mt-1 text-2xl font-extrabold text-ink">Money inputs</h3>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">Quick Item Check</p>
+            <h3 className="mt-1 text-2xl font-extrabold text-ink">What's going on with this item?</h3>
+            <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">No catalog cleanup. Just the numbers and context needed to decide what to do next.</p>
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {TEXT_FIELDS.map(([key, label]) => (
-              <label key={key} className={key === 'notes' ? 'text-sm font-bold text-slate-700 md:col-span-2' : 'text-sm font-bold text-slate-700'}>
-                {label}
-                <input value={String(form[key] ?? '')} onChange={(e) => update(key, e.target.value)} />
-              </label>
-            ))}
-
-            {NUMBER_FIELDS.map(([key, label]) => (
-              <label key={key} className="text-sm font-bold text-slate-700">
-                {label}
-                <input type="number" min={0} step="0.01" value={Number(form[key])} onChange={(e) => update(key, Number(e.target.value))} />
-              </label>
-            ))}
-          </div>
-
-          <div className="mt-5 grid gap-3 md:grid-cols-2">
-            <label className="flex items-center gap-3 rounded-2xl bg-ivory px-4 py-3 text-sm font-bold text-slate-700">
-              <input type="checkbox" checked={form.safetyDocs} onChange={(e) => update('safetyDocs', e.target.checked)} /> Safety docs available
+            <label className="text-sm font-bold text-slate-700 md:col-span-2">
+              Item title
+              <input value={form.title} onChange={(e) => updateTitle(e.target.value)} placeholder="Nike hoodie black mens large" />
             </label>
-            <label className="flex items-center gap-3 rounded-2xl bg-ivory px-4 py-3 text-sm font-bold text-slate-700">
-              <input type="checkbox" checked={form.gradingDescriptors} onChange={(e) => update('gradingDescriptors', e.target.checked)} /> Grading descriptors included
+            <label className="text-sm font-bold text-slate-700">
+              What you paid
+              <input type="number" min={0} step="0.01" value={form.purchaseCost} onChange={(e) => update('purchaseCost', Number(e.target.value))} />
+            </label>
+            <label className="text-sm font-bold text-slate-700">
+              Current price
+              <input type="number" min={0} step="0.01" value={form.targetSalePrice} onChange={(e) => update('targetSalePrice', Number(e.target.value))} />
+            </label>
+            <label className="text-sm font-bold text-slate-700">
+              Platform
+              <input value={form.platform} onChange={(e) => update('platform', e.target.value)} placeholder="eBay, Poshmark, Mercari" />
+            </label>
+            <label className="text-sm font-bold text-slate-700">
+              Condition
+              <input value={form.condition} onChange={(e) => update('condition', e.target.value)} placeholder="pre-owned good" />
+            </label>
+            <label className="text-sm font-bold text-slate-700">
+              Shipping
+              <input type="number" min={0} step="0.01" value={form.shippingPaid} onChange={(e) => update('shippingPaid', Number(e.target.value))} />
+            </label>
+            <label className="text-sm font-bold text-slate-700">
+              Days live
+              <input type="number" min={0} step="1" value={form.listingAgeDays} onChange={(e) => update('listingAgeDays', Number(e.target.value))} />
+            </label>
+            <label className="text-sm font-bold text-slate-700 md:col-span-2">
+              Optional notes
+              <input value={form.notes} onChange={(e) => update('notes', e.target.value)} placeholder="Low watchers, lots of likes, no offers, damaged box..." />
             </label>
           </div>
 
@@ -263,9 +259,9 @@ export default function AnalyzePage() {
             <div className="flex min-h-[420px] items-center rounded-2xl border border-dashed border-tan bg-white p-8 shadow-sm">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Awaiting item</p>
-                <h3 className="mt-3 text-3xl font-extrabold text-ink">Enter item economics to get the money decision.</h3>
+                <h3 className="mt-3 text-3xl font-extrabold text-ink">Tell us what's happening to get the money decision.</h3>
                 <p className="mt-4 max-w-xl text-sm leading-7 text-slate-600">
-                  The result will show current outcome, after-fix outcome, profit increase, market context, confidence, and the exact next action.
+                  Add title, price, cost, shipping, days live, and platform. The result shows the current outcome, after-fix outcome, profit increase, and exact next action.
                 </p>
               </div>
             </div>
