@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { DragEvent, useMemo, useState } from 'react';
 import { RiskBadge } from '@/components/RiskBadge';
 import { ScoreCard } from '@/components/ScoreCard';
 import { analyzeListing } from '@/lib/listingGenerator';
@@ -16,6 +16,19 @@ type InventoryDraft = {
   shipping: number;
 };
 
+type ParsedRow = Record<string, string | number | boolean | null | undefined>;
+type InventoryField = 'title' | 'price' | 'cost' | 'platform' | 'condition' | 'shipping';
+type ColumnMap = Record<InventoryField, string>;
+
+const INVENTORY_FIELDS: { key: InventoryField; label: string }[] = [
+  { key: 'title', label: 'Title' },
+  { key: 'price', label: 'Price' },
+  { key: 'cost', label: 'Cost' },
+  { key: 'platform', label: 'Platform' },
+  { key: 'condition', label: 'Condition' },
+  { key: 'shipping', label: 'Shipping' },
+];
+
 const STARTER_ITEMS: InventoryDraft[] = [
   { id: 1, title: 'Nike Tech Fleece Joggers Gray Mens Medium', price: 42, cost: 18, platform: 'eBay', condition: 'Pre-owned good', shipping: 7.5 },
   { id: 2, title: 'Coach Leather Crossbody Bag Brown Vintage', price: 58, cost: 24, platform: 'Poshmark', condition: 'Pre-owned fair', shipping: 0 },
@@ -23,6 +36,79 @@ const STARTER_ITEMS: InventoryDraft[] = [
   { id: 4, title: 'Carhartt Work Jacket Faded Brown Large', price: 64, cost: 32, platform: 'eBay', condition: 'Pre-owned worn', shipping: 10.5 },
   { id: 5, title: 'Madewell High Rise Jeans Blue Size 28', price: 34, cost: 12, platform: 'Poshmark', condition: 'Pre-owned good', shipping: 0 },
 ];
+
+const EMPTY_MAPPING: ColumnMap = {
+  title: '',
+  price: '',
+  cost: '',
+  platform: '',
+  condition: '',
+  shipping: '',
+};
+
+function toNumber(value: unknown) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const cleaned = String(value ?? '').replace(/[$,]/g, '').trim();
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeText(value: unknown) {
+  return String(value ?? '').trim();
+}
+
+function normalizeCondition(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
+function normalizePlatform(value: unknown) {
+  const platform = normalizeText(value);
+  return platform || 'eBay';
+}
+
+function inferMapping(columns: string[]): ColumnMap {
+  const find = (...needles: string[]) => {
+    const lowered = columns.map((column) => ({ column, lowered: column.toLowerCase().replace(/[^a-z0-9]/g, '') }));
+    return lowered.find(({ lowered: text }) => needles.some((needle) => text.includes(needle)))?.column ?? '';
+  };
+
+  return {
+    title: find('title', 'item', 'name', 'description'),
+    price: find('price', 'saleprice', 'listprice', 'asking'),
+    cost: find('cost', 'buycost', 'purchase', 'cogs'),
+    platform: find('platform', 'marketplace', 'channel'),
+    condition: find('condition', 'grade'),
+    shipping: find('shipping', 'ship', 'postage'),
+  };
+}
+
+function cleanRows(rows: ParsedRow[], mapping: ColumnMap) {
+  const warnings: string[] = [];
+  const usableRows = rows.slice(0, 20);
+  const items = usableRows.map((row, index) => {
+    const title = normalizeText(row[mapping.title]) || `Untitled inventory item ${index + 1}`;
+    const price = toNumber(row[mapping.price]);
+    const cost = toNumber(row[mapping.cost]);
+    const shipping = toNumber(row[mapping.shipping]);
+    const platform = normalizePlatform(row[mapping.platform]);
+    const condition = normalizeCondition(row[mapping.condition]) || 'condition missing';
+
+    if (!mapping.title) warnings.push('Title column is not mapped; placeholder titles were used.');
+    if (!mapping.price) warnings.push('Price column is not mapped; missing prices were treated as $0.');
+    if (!mapping.cost) warnings.push('Cost column is not mapped; missing costs were treated as $0.');
+    if (!mapping.platform) warnings.push('Platform column is not mapped; eBay was used as the default platform.');
+    if (!mapping.condition) warnings.push('Condition column is not mapped; condition missing was used.');
+    if (!mapping.shipping) warnings.push('Shipping column is not mapped; missing shipping was treated as $0.');
+    if (!price) warnings.push(`Row ${index + 1} has no usable price.`);
+
+    return { id: index + 1, title, price, cost, platform, condition, shipping };
+  });
+
+  if (rows.length > 20) warnings.push('Only the first 20 rows were imported for this test run.');
+  if (items.length < 5) warnings.push('Fewer than 5 rows were imported. Results still run, but a larger sample is more useful.');
+
+  return { items, warnings: Array.from(new Set(warnings)) };
+}
 
 function toListingInput(item: InventoryDraft, index: number): ListingInput {
   const [brand = 'Unbranded'] = item.title.trim().split(/\s+/);
@@ -108,9 +194,29 @@ function optimizedTitle(input: ListingInput) {
     .slice(0, 80);
 }
 
+async function parseInventoryFile(file: File) {
+  const XLSX = await import('xlsx');
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  const workbook = extension === 'csv'
+    ? XLSX.read(await file.text(), { type: 'string' })
+    : XLSX.read(await file.arrayBuffer(), { type: 'array' });
+  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json<ParsedRow>(firstSheet, { defval: '' });
+  const columns = Object.keys(rows[0] ?? {});
+
+  return { rows, columns };
+}
+
 export default function InventoryPage() {
   const [items, setItems] = useState<InventoryDraft[]>(STARTER_ITEMS);
   const [hasRun, setHasRun] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isParsing, setIsParsing] = useState(false);
+  const [fileName, setFileName] = useState('');
+  const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
+  const [columns, setColumns] = useState<string[]>([]);
+  const [mapping, setMapping] = useState<ColumnMap>(EMPTY_MAPPING);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   const rows = useMemo(() => {
     return items.map((item, index) => {
@@ -156,15 +262,46 @@ export default function InventoryPage() {
     setHasRun(false);
   };
 
+  const handleFile = async (file?: File) => {
+    if (!file) return;
+    setIsParsing(true);
+    setWarnings([]);
+    try {
+      const parsed = await parseInventoryFile(file);
+      setFileName(file.name);
+      setParsedRows(parsed.rows);
+      setColumns(parsed.columns);
+      setMapping(inferMapping(parsed.columns));
+      if (!parsed.rows.length) setWarnings(['No rows were detected in this file.']);
+    } catch {
+      setWarnings(['Could not parse this file. Try a simple CSV or a single-sheet Excel file.']);
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const importMappedRows = () => {
+    const cleaned = cleanRows(parsedRows, mapping);
+    setItems(cleaned.items.length ? cleaned.items : STARTER_ITEMS);
+    setWarnings(cleaned.warnings);
+    setHasRun(true);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+    handleFile(event.dataTransfer.files[0]);
+  };
+
   return (
     <section className="space-y-8">
       <div className="rounded-2xl border border-[#29204E] bg-[#070A18] p-6 text-white shadow-xl md:p-8">
         <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#C59BFF]">Test My Inventory</p>
         <div className="mt-3 grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
           <div>
-            <h2 className="text-4xl font-extrabold tracking-tight md:text-5xl">Run recovery analysis on real inventory before adding APIs.</h2>
+            <h2 className="text-4xl font-extrabold tracking-tight md:text-5xl">Upload real inventory and rank what to fix first.</h2>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-              Enter 5 to 20 real items. ResaleIQ uses the current deterministic engine to estimate recoverable money, rank what to fix first, and show the next action.
+              Drop a CSV or Excel file, map the columns, and ResaleIQ runs the current deterministic recovery engine without a backend or API.
             </p>
           </div>
           <div className="rounded-2xl border border-[#7AF59A]/25 bg-[#7AF59A]/10 p-5">
@@ -175,11 +312,87 @@ export default function InventoryPage() {
         </div>
       </div>
 
+      <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+        <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">File Upload</p>
+          <h3 className="mt-1 text-2xl font-extrabold text-ink">Upload CSV or Excel</h3>
+          <label
+            onDragOver={(event) => {
+              event.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+            className={`mt-5 flex min-h-[170px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 text-center transition ${
+              isDragging ? 'border-[#7AF59A] bg-[#7AF59A]/10' : 'border-tan bg-ivory'
+            }`}
+          >
+            <span className="text-lg font-extrabold text-ink">Drop inventory file here</span>
+            <span className="mt-2 text-sm font-bold text-slate-600">or click to choose .csv, .xlsx, or .xls</span>
+            <input className="hidden" type="file" accept=".csv,.xlsx,.xls" onChange={(event) => handleFile(event.target.files?.[0])} />
+          </label>
+          <div className="mt-4 rounded-2xl bg-ivory p-4 text-sm font-bold text-slate-700">
+            {isParsing ? 'Parsing file...' : fileName ? `Loaded: ${fileName}` : 'Example columns: title, price, cost, platform, condition, shipping'}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Column Mapping</p>
+              <h3 className="mt-1 text-2xl font-extrabold text-ink">Match file columns to ResaleIQ fields</h3>
+            </div>
+            <button type="button" onClick={importMappedRows} disabled={!parsedRows.length} className="bg-[#070A18] text-white hover:bg-[#2B185F] disabled:opacity-40">
+              Use Mapped File
+            </button>
+          </div>
+
+          {columns.length ? (
+            <>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {columns.map((column) => (
+                  <span key={column} className="rounded-full bg-ivory px-3 py-1 text-xs font-extrabold text-slate-700">{column}</span>
+                ))}
+              </div>
+              <div className="mt-5 grid gap-3 md:grid-cols-2">
+                {INVENTORY_FIELDS.map((field) => (
+                  <label key={field.key} className="text-sm font-bold text-slate-700">
+                    {field.label}
+                    <select
+                      value={mapping[field.key]}
+                      onChange={(event) => setMapping((current) => ({ ...current, [field.key]: event.target.value }))}
+                    >
+                      <option value="">Not mapped</option>
+                      {columns.map((column) => (
+                        <option key={column} value={column}>{column}</option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="mt-5 rounded-2xl border border-dashed border-tan bg-ivory p-6 text-sm font-bold leading-6 text-slate-600">
+              Upload a file to see detected columns. Imperfect files are allowed; missing numbers become 0 and missing platform defaults to eBay.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {warnings.length ? (
+        <div className="rounded-2xl border border-[#FFD36B]/50 bg-[#FFD36B]/10 p-5">
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#8A5A00]">Warnings, not blockers</p>
+          <ul className="mt-3 space-y-2 text-sm font-bold text-slate-700">
+            {warnings.map((warning) => <li key={warning}>- {warning}</li>)}
+          </ul>
+        </div>
+      ) : null}
+
       <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">Editable Dataset</p>
-            <h3 className="mt-1 text-2xl font-extrabold text-ink">Paste in real items</h3>
+            <h3 className="mt-1 text-2xl font-extrabold text-ink">Review or edit imported items</h3>
           </div>
           <div className="flex flex-wrap gap-3">
             <button type="button" onClick={addItem} disabled={!canAdd} className="bg-ivory text-ink disabled:opacity-40">
@@ -296,7 +509,7 @@ export default function InventoryPage() {
       ) : (
         <div className="rounded-2xl border border-dashed border-tan bg-white p-8 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Ready When You Are</p>
-          <h3 className="mt-3 text-3xl font-extrabold text-ink">Edit the dataset, then run the recovery analysis.</h3>
+          <h3 className="mt-3 text-3xl font-extrabold text-ink">Upload a file or edit the dataset, then run the recovery analysis.</h3>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600">
             The output will show total recoverable money, top items to fix, realistic ROI, and an action list a reseller can use during a daily inventory review.
           </p>
