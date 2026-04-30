@@ -19,6 +19,8 @@ type InventoryDraft = {
 type ParsedRow = Record<string, string | number | boolean | null | undefined>;
 type InventoryField = 'title' | 'price' | 'cost' | 'platform' | 'condition' | 'shipping';
 type ColumnMap = Record<InventoryField, string>;
+type Confidence = 'High' | 'Medium' | 'Low';
+type ConfidenceMap = Record<InventoryField, Confidence>;
 
 const MAX_IMPORT_ROWS = 100;
 const REQUIRED_FIELDS: InventoryField[] = ['title', 'price'];
@@ -49,6 +51,15 @@ const EMPTY_MAPPING: ColumnMap = {
   shipping: '',
 };
 
+const EMPTY_CONFIDENCE: ConfidenceMap = {
+  title: 'Low',
+  price: 'Low',
+  cost: 'Low',
+  platform: 'Low',
+  condition: 'Low',
+  shipping: 'Low',
+};
+
 function toNumber(value: unknown) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
   const cleaned = String(value ?? '').replace(/[$,]/g, '').trim();
@@ -73,33 +84,59 @@ function normalizeColumnName(column: string) {
   return column.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function inferMapping(columns: string[]): ColumnMap {
+function isMeaningfulColumn(column: string) {
+  const key = normalizeColumnName(column);
+  return Boolean(key && !/^empty\d*$/.test(key) && !/^__empty\d*$/.test(key) && key !== 'blank');
+}
+
+function detectColumn(columns: string[], exact: string[], partial: string[]) {
   const normalized = columns.map((column) => ({ column, key: normalizeColumnName(column) }));
-  const find = (...needles: string[]) => normalized.find(({ key }) => needles.some((needle) => key.includes(needle)))?.column ?? '';
+  const exactMatch = normalized.find(({ key }) => exact.includes(key));
+  if (exactMatch) return { column: exactMatch.column, confidence: 'High' as Confidence };
+  const partialMatch = normalized.find(({ key }) => partial.some((needle) => key.includes(needle)));
+  if (partialMatch) return { column: partialMatch.column, confidence: 'Medium' as Confidence };
+  return { column: '', confidence: 'Low' as Confidence };
+}
+
+function inferMapping(columns: string[]) {
+  const title = detectColumn(columns, ['title', 'item', 'name', 'itemname', 'product'], ['itemtitle', 'description', 'productname']);
+  const price = detectColumn(columns, ['price', 'listprice', 'listingprice', 'saleprice'], ['askingprice', 'askprice', 'currentprice']);
+  const cost = detectColumn(columns, ['cost', 'purchase', 'buyprice', 'purchaseprice'], ['purchasecost', 'buycost', 'itemcost', 'cogs']);
+  const platform = detectColumn(columns, ['platform', 'site', 'marketplace'], ['channel', 'sellingsite']);
+  const condition = detectColumn(columns, ['condition', 'grade'], ['itemcondition']);
+  const shipping = detectColumn(columns, ['shipping', 'ship', 'postage'], ['shippingcost', 'shippingpaid', 'shipcost']);
 
   return {
-    title: find('title', 'itemtitle', 'itemname', 'item', 'name', 'description', 'product'),
-    price: find('listprice', 'listingprice', 'saleprice', 'askingprice', 'askprice', 'price'),
-    cost: find('purchasecost', 'purchaseprice', 'buyprice', 'buycost', 'itemcost', 'cost', 'cogs'),
-    platform: find('platform', 'marketplace', 'channel', 'site', 'sellingsite'),
-    condition: find('condition', 'itemcondition', 'grade'),
-    shipping: find('shippingcost', 'shippingpaid', 'shipcost', 'ship', 'postage', 'shipping'),
+    mapping: {
+      title: title.column,
+      price: price.column,
+      cost: cost.column,
+      platform: platform.column,
+      condition: condition.column,
+      shipping: shipping.column,
+    },
+    confidence: {
+      title: title.confidence,
+      price: price.confidence,
+      cost: cost.confidence,
+      platform: platform.confidence,
+      condition: condition.confidence,
+      shipping: shipping.confidence,
+    },
   };
 }
 
 function summarizeRows(rows: ParsedRow[], mapping: ColumnMap) {
   const limitedRows = rows.slice(0, MAX_IMPORT_ROWS);
-  const titleMissing = !mapping.title ? limitedRows.length : limitedRows.filter((row) => !normalizeText(row[mapping.title])).length;
-  const invalidPrices = !mapping.price ? limitedRows.length : limitedRows.filter((row) => toNumber(row[mapping.price]) <= 0).length;
-  const missingOptional = (['cost', 'platform', 'condition', 'shipping'] as InventoryField[]).filter((field) => !mapping[field]).length;
+  const missingTitles = !mapping.title ? limitedRows.length : limitedRows.filter((row) => !normalizeText(row[mapping.title])).length;
+  const priceProblems = !mapping.price ? limitedRows.length : limitedRows.filter((row) => toNumber(row[mapping.price]) <= 0).length;
 
   return {
     importedRows: limitedRows.length,
     skippedRows: Math.max(0, rows.length - MAX_IMPORT_ROWS),
-    titleMissing,
-    invalidPrices,
-    missingOptional,
-    ready: Boolean(mapping.title && mapping.price && titleMissing === 0 && invalidPrices === 0 && limitedRows.length > 0),
+    missingTitles,
+    priceProblems,
+    ready: Boolean(mapping.title && mapping.price && missingTitles === 0 && priceProblems === 0 && limitedRows.length > 0),
   };
 }
 
@@ -114,16 +151,16 @@ function cleanRows(rows: ParsedRow[], mapping: ColumnMap) {
     const platform = normalizePlatform(row[mapping.platform]);
     const condition = normalizeCondition(row[mapping.condition]) || 'condition missing';
 
-    if (!mapping.cost) warnings.push('Cost column is not mapped; missing costs were treated as $0.');
-    if (!mapping.platform) warnings.push('Platform column is not mapped; eBay was used as the default platform.');
-    if (!mapping.condition) warnings.push('Condition column is not mapped; condition missing was used.');
-    if (!mapping.shipping) warnings.push('Shipping column is not mapped; missing shipping was treated as $0.');
+    if (!mapping.cost) warnings.push('We could not find your cost column, so missing costs were treated as $0.');
+    if (!mapping.platform) warnings.push('We could not find your platform column, so eBay was used as the default.');
+    if (!mapping.condition) warnings.push('We could not find your condition column, so condition missing was used.');
+    if (!mapping.shipping) warnings.push('We could not find your shipping column, so shipping was treated as $0.');
 
     return { id: index + 1, title, price, cost, platform, condition, shipping };
   });
 
-  if (rows.length > MAX_IMPORT_ROWS) warnings.push(`Only the first ${MAX_IMPORT_ROWS} rows were imported for this MVP test run.`);
-  if (items.length < 5) warnings.push('Fewer than 5 rows were imported. Results still run, but a larger sample is more useful.');
+  if (rows.length > MAX_IMPORT_ROWS) warnings.push(`This file has more than ${MAX_IMPORT_ROWS} rows, so the MVP imported the first ${MAX_IMPORT_ROWS}.`);
+  if (items.length < 5) warnings.push('This is a small sample. Results still run, but 5 or more rows will give a better daily picture.');
 
   return { items, warnings: Array.from(new Set(warnings)) };
 }
@@ -132,7 +169,7 @@ function summarizeItems(items: InventoryDraft[]) {
   return {
     total: items.length,
     missingTitles: items.filter((item) => !item.title.trim()).length,
-    invalidPrices: items.filter((item) => item.price <= 0).length,
+    priceProblems: items.filter((item) => item.price <= 0).length,
   };
 }
 
@@ -228,7 +265,7 @@ async function parseInventoryFile(file: File) {
     : XLSX.read(await file.arrayBuffer(), { type: 'array' });
   const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json<ParsedRow>(firstSheet, { defval: '' });
-  const columns = Object.keys(rows[0] ?? {});
+  const columns = Object.keys(rows[0] ?? {}).filter(isMeaningfulColumn);
 
   return { rows, columns };
 }
@@ -242,13 +279,17 @@ export default function InventoryPage() {
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
   const [mapping, setMapping] = useState<ColumnMap>(EMPTY_MAPPING);
+  const [confidence, setConfidence] = useState<ConfidenceMap>(EMPTY_CONFIDENCE);
+  const [showFieldEditor, setShowFieldEditor] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
 
   const mappingSummary = useMemo(() => summarizeRows(parsedRows, mapping), [parsedRows, mapping]);
   const itemSummary = useMemo(() => summarizeItems(items), [items]);
   const requiredMappingMissing = REQUIRED_FIELDS.filter((field) => !mapping[field]);
-  const canImportMappedRows = parsedRows.length > 0 && requiredMappingMissing.length === 0;
-  const canAnalyzeItems = itemSummary.total > 0 && itemSummary.missingTitles === 0 && itemSummary.invalidPrices === 0;
+  const canConfirmDetectedRows = parsedRows.length > 0 && requiredMappingMissing.length === 0;
+  const canAnalyzeItems = itemSummary.total > 0 && itemSummary.missingTitles === 0 && itemSummary.priceProblems === 0;
+  const previewRows = parsedRows.slice(0, 5);
+  const previewColumns = INVENTORY_FIELDS.map((field) => mapping[field.key]).filter(Boolean);
 
   const rows = useMemo(() => {
     return items.map((item, index) => {
@@ -299,24 +340,34 @@ export default function InventoryPage() {
     setIsParsing(true);
     setWarnings([]);
     setHasRun(false);
+    setShowFieldEditor(false);
     try {
       const parsed = await parseInventoryFile(file);
+      const detection = inferMapping(parsed.columns);
+      const nextWarnings: string[] = [];
+
+      if (!parsed.rows.length) nextWarnings.push('We could not find any inventory rows in this file.');
+      if (!detection.mapping.title) nextWarnings.push('We could not find your title column.');
+      if (!detection.mapping.price) nextWarnings.push('We could not find your price column.');
+      if (parsed.rows.length > MAX_IMPORT_ROWS) nextWarnings.push(`This file has ${parsed.rows.length} rows. The MVP will use the first ${MAX_IMPORT_ROWS}.`);
+
       setFileName(file.name);
       setParsedRows(parsed.rows);
       setColumns(parsed.columns);
-      setMapping(inferMapping(parsed.columns));
-      if (!parsed.rows.length) setWarnings(['No rows were detected in this file.']);
-      if (parsed.rows.length > MAX_IMPORT_ROWS) setWarnings([`This file has ${parsed.rows.length} rows. The MVP imports the first ${MAX_IMPORT_ROWS} rows so the browser stays responsive.`]);
+      setMapping(detection.mapping);
+      setConfidence(detection.confidence);
+      setWarnings(nextWarnings);
     } catch {
-      setWarnings(['Could not parse this file. Try a simple CSV or a single-sheet Excel file.']);
+      setWarnings(['We could not read this file. Try a simple CSV or a single-sheet Excel file.']);
     } finally {
       setIsParsing(false);
     }
   };
 
-  const importMappedRows = () => {
-    if (!canImportMappedRows) {
-      setWarnings(['Map title and price before importing. Those fields are required for recovery analysis.']);
+  const confirmDetectedRows = () => {
+    if (!canConfirmDetectedRows) {
+      setWarnings(['We need a title column and a price column before we can import your inventory.']);
+      setShowFieldEditor(true);
       return;
     }
     const cleaned = cleanRows(parsedRows, mapping);
@@ -327,7 +378,7 @@ export default function InventoryPage() {
 
   const runAnalysis = () => {
     if (!canAnalyzeItems) {
-      setWarnings(['Fix missing titles and invalid prices before running analysis. Optional fields can stay blank.']);
+      setWarnings(['Some rows still need a title or a usable price before analysis can run.']);
       setHasRun(false);
       return;
     }
@@ -342,8 +393,8 @@ export default function InventoryPage() {
 
   const steps = [
     { label: 'Upload', complete: Boolean(parsedRows.length || items.length), active: !parsedRows.length },
-    { label: 'Map', complete: parsedRows.length > 0 && requiredMappingMissing.length === 0, active: parsedRows.length > 0 && requiredMappingMissing.length > 0 },
-    { label: 'Review', complete: canAnalyzeItems, active: !hasRun && canImportMappedRows },
+    { label: 'Confirm', complete: parsedRows.length > 0 && requiredMappingMissing.length === 0, active: parsedRows.length > 0 && !hasRun },
+    { label: 'Review', complete: canAnalyzeItems, active: !hasRun && canAnalyzeItems },
     { label: 'Analyze', complete: hasRun, active: hasRun },
   ];
 
@@ -355,7 +406,7 @@ export default function InventoryPage() {
           <div>
             <h2 className="text-4xl font-extrabold tracking-tight md:text-5xl">Upload real inventory and rank what to fix first.</h2>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-              Drop a CSV or Excel file, map the required columns, review the sanity check, and run recovery analysis without a backend or API.
+              Drop a CSV or Excel file, confirm that ResaleIQ found the right fields, then run recovery analysis without a backend or API.
             </p>
           </div>
           <div className="rounded-2xl border border-[#7AF59A]/25 bg-[#7AF59A]/10 p-5">
@@ -375,7 +426,7 @@ export default function InventoryPage() {
         ))}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+      <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
         <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">File Upload</p>
           <h3 className="mt-1 text-2xl font-extrabold text-ink">Upload CSV or Excel</h3>
@@ -395,69 +446,106 @@ export default function InventoryPage() {
             <input className="hidden" type="file" accept=".csv,.xlsx,.xls" onChange={(event) => handleFile(event.target.files?.[0])} />
           </label>
           <div className="mt-4 rounded-2xl bg-ivory p-4 text-sm font-bold text-slate-700">
-            {isParsing ? 'Parsing file...' : fileName ? `Loaded: ${fileName}` : 'Example columns: title, price, cost, platform, condition, shipping'}
+            {isParsing ? 'Reading your file...' : fileName ? `Loaded: ${fileName}` : 'Example columns: title, price, cost, platform, condition, shipping'}
           </div>
         </div>
 
         <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Column Mapping</p>
-              <h3 className="mt-1 text-2xl font-extrabold text-ink">Match file columns to ResaleIQ fields</h3>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Confirm Your Inventory Data</p>
+              <h3 className="mt-1 text-2xl font-extrabold text-ink">Does this look correct?</h3>
             </div>
-            <button type="button" onClick={importMappedRows} disabled={!canImportMappedRows} className="bg-[#070A18] text-white hover:bg-[#2B185F] disabled:opacity-40">
-              Review Mapped File
-            </button>
+            <div className="flex flex-wrap gap-3">
+              <button type="button" onClick={() => setShowFieldEditor((value) => !value)} disabled={!columns.length} className="bg-ivory text-ink disabled:opacity-40">
+                Adjust Fields
+              </button>
+              <button type="button" onClick={confirmDetectedRows} disabled={!canConfirmDetectedRows} className="bg-[#070A18] text-white hover:bg-[#2B185F] disabled:opacity-40">
+                Yes, Review These Items
+              </button>
+            </div>
           </div>
 
           {columns.length ? (
             <>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {columns.map((column) => (
-                  <span key={column} className="rounded-full bg-ivory px-3 py-1 text-xs font-extrabold text-slate-700">{column}</span>
-                ))}
-              </div>
-              <div className="mt-5 grid gap-3 md:grid-cols-2">
+              <div className="mt-5 grid gap-3 md:grid-cols-3">
                 {INVENTORY_FIELDS.map((field) => {
-                  const missingRequired = Boolean(field.required && !mapping[field.key]);
+                  const detected = mapping[field.key];
+                  const requiredMissing = Boolean(field.required && !detected);
                   return (
-                    <label key={field.key} className={`rounded-2xl p-3 text-sm font-bold ${missingRequired ? 'bg-red-50 text-red-800' : 'bg-ivory text-slate-700'}`}>
-                      {field.label}{field.required ? ' required' : ''}
-                      <select
-                        value={mapping[field.key]}
-                        onChange={(event) => setMapping((current) => ({ ...current, [field.key]: event.target.value }))}
-                      >
-                        <option value="">Not mapped</option>
-                        {columns.map((column) => (
-                          <option key={column} value={column}>{column}</option>
-                        ))}
-                      </select>
-                      {missingRequired ? <span className="mt-2 block text-xs font-extrabold">Map this before importing.</span> : null}
-                    </label>
+                    <div key={field.key} className={`rounded-2xl p-4 ${requiredMissing ? 'bg-red-50 text-red-800' : 'bg-ivory text-slate-700'}`}>
+                      <p className="text-xs font-extrabold uppercase tracking-[0.16em] opacity-70">{field.label}</p>
+                      <p className="mt-2 text-sm font-extrabold">{detected || (field.key === 'price' ? 'We could not find your price column' : field.key === 'title' ? 'We could not find your title column' : 'Not found, optional')}</p>
+                      <p className="mt-2 text-xs font-bold">Confidence: {detected ? confidence[field.key] : 'Low'}</p>
+                    </div>
                   );
                 })}
               </div>
 
-              <div className="mt-5 grid gap-3 md:grid-cols-4">
-                <ScoreCard title="Rows Detected" value={parsedRows.length} helper={`${mappingSummary.importedRows} will import now.`} tone="dark" />
-                <ScoreCard title="Missing Titles" value={mappingSummary.titleMissing} helper="Must be fixed before analysis." tone={mappingSummary.titleMissing ? 'danger' : 'success'} />
-                <ScoreCard title="Invalid Prices" value={mappingSummary.invalidPrices} helper="Prices must be above $0." tone={mappingSummary.invalidPrices ? 'danger' : 'success'} />
-                <ScoreCard title="Skipped Rows" value={mappingSummary.skippedRows} helper={`MVP limit is ${MAX_IMPORT_ROWS} rows.`} tone={mappingSummary.skippedRows ? 'warning' : 'neutral'} />
+              <div className="mt-5 rounded-2xl border border-tan bg-ivory p-4">
+                <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">Preview</p>
+                    <h4 className="mt-1 text-xl font-extrabold text-ink">First 5 rows</h4>
+                  </div>
+                  <p className="text-sm font-bold text-slate-600">{mappingSummary.importedRows} rows ready, {mappingSummary.skippedRows} over the MVP limit</p>
+                </div>
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full min-w-[680px] text-left text-sm">
+                    <thead>
+                      <tr className="text-xs font-extrabold uppercase tracking-[0.14em] text-slate-500">
+                        {previewColumns.map((column) => <th key={column} className="px-3 py-2">{column}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody className="font-semibold text-slate-700">
+                      {previewRows.map((row, index) => (
+                        <tr key={index} className="border-t border-tan/70">
+                          {previewColumns.map((column) => <td key={column} className="max-w-[220px] truncate px-3 py-3">{normalizeText(row[column]) || '-'}</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
+
+              {showFieldEditor ? (
+                <div className="mt-5 rounded-2xl border border-[#29204E] bg-[#070A18] p-5 text-white">
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#7AF59A]">Adjust only if needed</p>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {INVENTORY_FIELDS.map((field) => (
+                      <label key={field.key} className="text-sm font-bold text-slate-200">
+                        {field.label}{field.required ? ' required' : ''}
+                        <select
+                          value={mapping[field.key]}
+                          onChange={(event) => setMapping((current) => ({ ...current, [field.key]: event.target.value }))}
+                        >
+                          <option value="">Leave blank</option>
+                          {columns.map((column) => (
+                            <option key={column} value={column}>{column}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </>
           ) : (
             <div className="mt-5 rounded-2xl border border-dashed border-tan bg-ivory p-6 text-sm font-bold leading-6 text-slate-600">
-              Upload a file to see detected columns. Title and price are required; optional blanks become warnings.
+              Upload a file and ResaleIQ will detect the useful columns automatically. You will only adjust fields if the preview looks wrong.
             </div>
           )}
         </div>
       </div>
 
-      {warnings.length || requiredMappingMissing.length ? (
+      {warnings.length || requiredMappingMissing.length || mappingSummary.priceProblems || mappingSummary.missingTitles ? (
         <div className="rounded-2xl border border-[#FFD36B]/50 bg-[#FFD36B]/10 p-5">
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#8A5A00]">Warnings, not blockers</p>
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#8A5A00]">Needs attention</p>
           <ul className="mt-3 space-y-2 text-sm font-bold text-slate-700">
-            {requiredMappingMissing.map((field) => <li key={field}>- Map {field} before importing. It is required.</li>)}
+            {requiredMappingMissing.includes('title') ? <li>- We could not find your title column.</li> : null}
+            {requiredMappingMissing.includes('price') ? <li>- We could not find your price column.</li> : null}
+            {mappingSummary.missingTitles ? <li>- Some rows are missing item titles.</li> : null}
+            {mappingSummary.priceProblems ? <li>- Some rows need a usable price above $0.</li> : null}
             {warnings.map((warning) => <li key={warning}>- {warning}</li>)}
           </ul>
         </div>
@@ -481,25 +569,25 @@ export default function InventoryPage() {
 
         <div className="mt-5 grid gap-3 md:grid-cols-3">
           <ScoreCard title="Total Items" value={itemSummary.total} helper="Rows currently staged for analysis." tone="dark" />
-          <ScoreCard title="Missing Titles" value={itemSummary.missingTitles} helper="Required before analysis can run." tone={itemSummary.missingTitles ? 'danger' : 'success'} />
-          <ScoreCard title="Invalid Prices" value={itemSummary.invalidPrices} helper="Required price must be above $0." tone={itemSummary.invalidPrices ? 'danger' : 'success'} />
+          <ScoreCard title="Rows Missing Title" value={itemSummary.missingTitles} helper="Needed before analysis can run." tone={itemSummary.missingTitles ? 'danger' : 'success'} />
+          <ScoreCard title="Rows Needing Price" value={itemSummary.priceProblems} helper="Price must be above $0." tone={itemSummary.priceProblems ? 'danger' : 'success'} />
         </div>
 
         <div className="mt-5 space-y-3">
           {items.map((item, index) => {
             const missingTitle = !item.title.trim();
-            const invalidPrice = item.price <= 0;
+            const priceProblem = item.price <= 0;
             return (
-              <div key={item.id} className={`grid gap-3 rounded-2xl border p-4 lg:grid-cols-[1.5fr_0.7fr_0.7fr_0.8fr_0.9fr_0.7fr_auto] ${missingTitle || invalidPrice ? 'border-red-200 bg-red-50' : 'border-tan/80 bg-ivory'}`}>
+              <div key={item.id} className={`grid gap-3 rounded-2xl border p-4 lg:grid-cols-[1.5fr_0.7fr_0.7fr_0.8fr_0.9fr_0.7fr_auto] ${missingTitle || priceProblem ? 'border-red-200 bg-red-50' : 'border-tan/80 bg-ivory'}`}>
                 <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
                   Title
                   <input value={item.title} onChange={(e) => updateItem(item.id, 'title', e.target.value)} placeholder={`Item ${index + 1} title`} />
-                  {missingTitle ? <span className="mt-1 block text-xs text-red-700">Required</span> : null}
+                  {missingTitle ? <span className="mt-1 block text-xs text-red-700">Needed</span> : null}
                 </label>
                 <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
                   Price
                   <input type="number" min={0} step="0.01" value={item.price} onChange={(e) => updateItem(item.id, 'price', Number(e.target.value))} />
-                  {invalidPrice ? <span className="mt-1 block text-xs text-red-700">Must be above $0</span> : null}
+                  {priceProblem ? <span className="mt-1 block text-xs text-red-700">Needs price above $0</span> : null}
                 </label>
                 <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
                   Cost
@@ -596,9 +684,9 @@ export default function InventoryPage() {
       ) : (
         <div className="rounded-2xl border border-dashed border-tan bg-white p-8 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Ready When You Are</p>
-          <h3 className="mt-3 text-3xl font-extrabold text-ink">Upload, map, review, then run the recovery analysis.</h3>
+          <h3 className="mt-3 text-3xl font-extrabold text-ink">Upload, confirm, review, then run the recovery analysis.</h3>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600">
-            Title and price are required so the money math stays grounded. Optional fields can stay imperfect and will show warnings instead of blocking the flow.
+            ResaleIQ detects likely columns first. Non-technical sellers only adjust fields when the preview does not look right.
           </p>
         </div>
       )}
