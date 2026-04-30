@@ -1,6 +1,6 @@
 'use client';
 
-import { DragEvent, useMemo, useState } from 'react';
+import { type DragEvent, useMemo, useState } from 'react';
 import { RiskBadge } from '@/components/RiskBadge';
 import { ScoreCard } from '@/components/ScoreCard';
 import { analyzeListing } from '@/lib/listingGenerator';
@@ -20,9 +20,12 @@ type ParsedRow = Record<string, string | number | boolean | null | undefined>;
 type InventoryField = 'title' | 'price' | 'cost' | 'platform' | 'condition' | 'shipping';
 type ColumnMap = Record<InventoryField, string>;
 
-const INVENTORY_FIELDS: { key: InventoryField; label: string }[] = [
-  { key: 'title', label: 'Title' },
-  { key: 'price', label: 'Price' },
+const MAX_IMPORT_ROWS = 100;
+const REQUIRED_FIELDS: InventoryField[] = ['title', 'price'];
+
+const INVENTORY_FIELDS: { key: InventoryField; label: string; required?: boolean }[] = [
+  { key: 'title', label: 'Title', required: true },
+  { key: 'price', label: 'Price', required: true },
   { key: 'cost', label: 'Cost' },
   { key: 'platform', label: 'Platform' },
   { key: 'condition', label: 'Condition' },
@@ -66,48 +69,71 @@ function normalizePlatform(value: unknown) {
   return platform || 'eBay';
 }
 
+function normalizeColumnName(column: string) {
+  return column.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 function inferMapping(columns: string[]): ColumnMap {
-  const find = (...needles: string[]) => {
-    const lowered = columns.map((column) => ({ column, lowered: column.toLowerCase().replace(/[^a-z0-9]/g, '') }));
-    return lowered.find(({ lowered: text }) => needles.some((needle) => text.includes(needle)))?.column ?? '';
-  };
+  const normalized = columns.map((column) => ({ column, key: normalizeColumnName(column) }));
+  const find = (...needles: string[]) => normalized.find(({ key }) => needles.some((needle) => key.includes(needle)))?.column ?? '';
 
   return {
-    title: find('title', 'item', 'name', 'description'),
-    price: find('price', 'saleprice', 'listprice', 'asking'),
-    cost: find('cost', 'buycost', 'purchase', 'cogs'),
-    platform: find('platform', 'marketplace', 'channel'),
-    condition: find('condition', 'grade'),
-    shipping: find('shipping', 'ship', 'postage'),
+    title: find('title', 'itemtitle', 'itemname', 'item', 'name', 'description', 'product'),
+    price: find('listprice', 'listingprice', 'saleprice', 'askingprice', 'askprice', 'price'),
+    cost: find('purchasecost', 'purchaseprice', 'buyprice', 'buycost', 'itemcost', 'cost', 'cogs'),
+    platform: find('platform', 'marketplace', 'channel', 'site', 'sellingsite'),
+    condition: find('condition', 'itemcondition', 'grade'),
+    shipping: find('shippingcost', 'shippingpaid', 'shipcost', 'ship', 'postage', 'shipping'),
+  };
+}
+
+function summarizeRows(rows: ParsedRow[], mapping: ColumnMap) {
+  const limitedRows = rows.slice(0, MAX_IMPORT_ROWS);
+  const titleMissing = !mapping.title ? limitedRows.length : limitedRows.filter((row) => !normalizeText(row[mapping.title])).length;
+  const invalidPrices = !mapping.price ? limitedRows.length : limitedRows.filter((row) => toNumber(row[mapping.price]) <= 0).length;
+  const missingOptional = (['cost', 'platform', 'condition', 'shipping'] as InventoryField[]).filter((field) => !mapping[field]).length;
+
+  return {
+    importedRows: limitedRows.length,
+    skippedRows: Math.max(0, rows.length - MAX_IMPORT_ROWS),
+    titleMissing,
+    invalidPrices,
+    missingOptional,
+    ready: Boolean(mapping.title && mapping.price && titleMissing === 0 && invalidPrices === 0 && limitedRows.length > 0),
   };
 }
 
 function cleanRows(rows: ParsedRow[], mapping: ColumnMap) {
   const warnings: string[] = [];
-  const usableRows = rows.slice(0, 20);
+  const usableRows = rows.slice(0, MAX_IMPORT_ROWS);
   const items = usableRows.map((row, index) => {
-    const title = normalizeText(row[mapping.title]) || `Untitled inventory item ${index + 1}`;
+    const title = normalizeText(row[mapping.title]);
     const price = toNumber(row[mapping.price]);
     const cost = toNumber(row[mapping.cost]);
     const shipping = toNumber(row[mapping.shipping]);
     const platform = normalizePlatform(row[mapping.platform]);
     const condition = normalizeCondition(row[mapping.condition]) || 'condition missing';
 
-    if (!mapping.title) warnings.push('Title column is not mapped; placeholder titles were used.');
-    if (!mapping.price) warnings.push('Price column is not mapped; missing prices were treated as $0.');
     if (!mapping.cost) warnings.push('Cost column is not mapped; missing costs were treated as $0.');
     if (!mapping.platform) warnings.push('Platform column is not mapped; eBay was used as the default platform.');
     if (!mapping.condition) warnings.push('Condition column is not mapped; condition missing was used.');
     if (!mapping.shipping) warnings.push('Shipping column is not mapped; missing shipping was treated as $0.');
-    if (!price) warnings.push(`Row ${index + 1} has no usable price.`);
 
     return { id: index + 1, title, price, cost, platform, condition, shipping };
   });
 
-  if (rows.length > 20) warnings.push('Only the first 20 rows were imported for this test run.');
+  if (rows.length > MAX_IMPORT_ROWS) warnings.push(`Only the first ${MAX_IMPORT_ROWS} rows were imported for this MVP test run.`);
   if (items.length < 5) warnings.push('Fewer than 5 rows were imported. Results still run, but a larger sample is more useful.');
 
   return { items, warnings: Array.from(new Set(warnings)) };
+}
+
+function summarizeItems(items: InventoryDraft[]) {
+  return {
+    total: items.length,
+    missingTitles: items.filter((item) => !item.title.trim()).length,
+    invalidPrices: items.filter((item) => item.price <= 0).length,
+  };
 }
 
 function toListingInput(item: InventoryDraft, index: number): ListingInput {
@@ -218,6 +244,12 @@ export default function InventoryPage() {
   const [mapping, setMapping] = useState<ColumnMap>(EMPTY_MAPPING);
   const [warnings, setWarnings] = useState<string[]>([]);
 
+  const mappingSummary = useMemo(() => summarizeRows(parsedRows, mapping), [parsedRows, mapping]);
+  const itemSummary = useMemo(() => summarizeItems(items), [items]);
+  const requiredMappingMissing = REQUIRED_FIELDS.filter((field) => !mapping[field]);
+  const canImportMappedRows = parsedRows.length > 0 && requiredMappingMissing.length === 0;
+  const canAnalyzeItems = itemSummary.total > 0 && itemSummary.missingTitles === 0 && itemSummary.invalidPrices === 0;
+
   const rows = useMemo(() => {
     return items.map((item, index) => {
       const input = toListingInput(item, index);
@@ -238,8 +270,8 @@ export default function InventoryPage() {
   const totalInventoryValue = prioritized.reduce((sum, row) => sum + row.item.price, 0);
   const fixNow = prioritized.filter((row) => row.analysis.deadListingRisk.riskScore >= 30).length;
   const averageRoi = Math.round(prioritized.reduce((sum, row) => sum + row.current.roi, 0) / Math.max(prioritized.length, 1));
-  const canAdd = items.length < 20;
-  const canRemove = items.length > 5;
+  const canAdd = items.length < MAX_IMPORT_ROWS;
+  const canRemove = items.length > 1;
 
   const updateItem = (id: number, key: keyof InventoryDraft, value: string | number) => {
     setItems((current) => current.map((item) => (item.id === id ? { ...item, [key]: value } : item)));
@@ -266,6 +298,7 @@ export default function InventoryPage() {
     if (!file) return;
     setIsParsing(true);
     setWarnings([]);
+    setHasRun(false);
     try {
       const parsed = await parseInventoryFile(file);
       setFileName(file.name);
@@ -273,6 +306,7 @@ export default function InventoryPage() {
       setColumns(parsed.columns);
       setMapping(inferMapping(parsed.columns));
       if (!parsed.rows.length) setWarnings(['No rows were detected in this file.']);
+      if (parsed.rows.length > MAX_IMPORT_ROWS) setWarnings([`This file has ${parsed.rows.length} rows. The MVP imports the first ${MAX_IMPORT_ROWS} rows so the browser stays responsive.`]);
     } catch {
       setWarnings(['Could not parse this file. Try a simple CSV or a single-sheet Excel file.']);
     } finally {
@@ -281,9 +315,22 @@ export default function InventoryPage() {
   };
 
   const importMappedRows = () => {
+    if (!canImportMappedRows) {
+      setWarnings(['Map title and price before importing. Those fields are required for recovery analysis.']);
+      return;
+    }
     const cleaned = cleanRows(parsedRows, mapping);
     setItems(cleaned.items.length ? cleaned.items : STARTER_ITEMS);
     setWarnings(cleaned.warnings);
+    setHasRun(false);
+  };
+
+  const runAnalysis = () => {
+    if (!canAnalyzeItems) {
+      setWarnings(['Fix missing titles and invalid prices before running analysis. Optional fields can stay blank.']);
+      setHasRun(false);
+      return;
+    }
     setHasRun(true);
   };
 
@@ -293,6 +340,13 @@ export default function InventoryPage() {
     handleFile(event.dataTransfer.files[0]);
   };
 
+  const steps = [
+    { label: 'Upload', complete: Boolean(parsedRows.length || items.length), active: !parsedRows.length },
+    { label: 'Map', complete: parsedRows.length > 0 && requiredMappingMissing.length === 0, active: parsedRows.length > 0 && requiredMappingMissing.length > 0 },
+    { label: 'Review', complete: canAnalyzeItems, active: !hasRun && canImportMappedRows },
+    { label: 'Analyze', complete: hasRun, active: hasRun },
+  ];
+
   return (
     <section className="space-y-8">
       <div className="rounded-2xl border border-[#29204E] bg-[#070A18] p-6 text-white shadow-xl md:p-8">
@@ -301,15 +355,24 @@ export default function InventoryPage() {
           <div>
             <h2 className="text-4xl font-extrabold tracking-tight md:text-5xl">Upload real inventory and rank what to fix first.</h2>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-              Drop a CSV or Excel file, map the columns, and ResaleIQ runs the current deterministic recovery engine without a backend or API.
+              Drop a CSV or Excel file, map the required columns, review the sanity check, and run recovery analysis without a backend or API.
             </p>
           </div>
           <div className="rounded-2xl border border-[#7AF59A]/25 bg-[#7AF59A]/10 p-5">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#7AF59A]">Current test set</p>
             <p className="mt-2 text-5xl font-black text-[#7AF59A]">{items.length}</p>
-            <p className="mt-1 text-sm font-bold text-slate-200">items ready for recovery analysis</p>
+            <p className="mt-1 text-sm font-bold text-slate-200">items ready for review</p>
           </div>
         </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-4">
+        {steps.map((step, index) => (
+          <div key={step.label} className={`rounded-2xl border p-4 ${step.complete || step.active ? 'border-[#070A18] bg-[#070A18] text-white' : 'border-tan bg-white text-slate-600'}`}>
+            <p className="text-xs font-extrabold uppercase tracking-[0.16em] opacity-70">Step {index + 1}</p>
+            <p className="mt-1 text-lg font-extrabold">{step.label}</p>
+          </div>
+        ))}
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
@@ -342,8 +405,8 @@ export default function InventoryPage() {
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Column Mapping</p>
               <h3 className="mt-1 text-2xl font-extrabold text-ink">Match file columns to ResaleIQ fields</h3>
             </div>
-            <button type="button" onClick={importMappedRows} disabled={!parsedRows.length} className="bg-[#070A18] text-white hover:bg-[#2B185F] disabled:opacity-40">
-              Use Mapped File
+            <button type="button" onClick={importMappedRows} disabled={!canImportMappedRows} className="bg-[#070A18] text-white hover:bg-[#2B185F] disabled:opacity-40">
+              Review Mapped File
             </button>
           </div>
 
@@ -355,34 +418,46 @@ export default function InventoryPage() {
                 ))}
               </div>
               <div className="mt-5 grid gap-3 md:grid-cols-2">
-                {INVENTORY_FIELDS.map((field) => (
-                  <label key={field.key} className="text-sm font-bold text-slate-700">
-                    {field.label}
-                    <select
-                      value={mapping[field.key]}
-                      onChange={(event) => setMapping((current) => ({ ...current, [field.key]: event.target.value }))}
-                    >
-                      <option value="">Not mapped</option>
-                      {columns.map((column) => (
-                        <option key={column} value={column}>{column}</option>
-                      ))}
-                    </select>
-                  </label>
-                ))}
+                {INVENTORY_FIELDS.map((field) => {
+                  const missingRequired = Boolean(field.required && !mapping[field.key]);
+                  return (
+                    <label key={field.key} className={`rounded-2xl p-3 text-sm font-bold ${missingRequired ? 'bg-red-50 text-red-800' : 'bg-ivory text-slate-700'}`}>
+                      {field.label}{field.required ? ' required' : ''}
+                      <select
+                        value={mapping[field.key]}
+                        onChange={(event) => setMapping((current) => ({ ...current, [field.key]: event.target.value }))}
+                      >
+                        <option value="">Not mapped</option>
+                        {columns.map((column) => (
+                          <option key={column} value={column}>{column}</option>
+                        ))}
+                      </select>
+                      {missingRequired ? <span className="mt-2 block text-xs font-extrabold">Map this before importing.</span> : null}
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="mt-5 grid gap-3 md:grid-cols-4">
+                <ScoreCard title="Rows Detected" value={parsedRows.length} helper={`${mappingSummary.importedRows} will import now.`} tone="dark" />
+                <ScoreCard title="Missing Titles" value={mappingSummary.titleMissing} helper="Must be fixed before analysis." tone={mappingSummary.titleMissing ? 'danger' : 'success'} />
+                <ScoreCard title="Invalid Prices" value={mappingSummary.invalidPrices} helper="Prices must be above $0." tone={mappingSummary.invalidPrices ? 'danger' : 'success'} />
+                <ScoreCard title="Skipped Rows" value={mappingSummary.skippedRows} helper={`MVP limit is ${MAX_IMPORT_ROWS} rows.`} tone={mappingSummary.skippedRows ? 'warning' : 'neutral'} />
               </div>
             </>
           ) : (
             <div className="mt-5 rounded-2xl border border-dashed border-tan bg-ivory p-6 text-sm font-bold leading-6 text-slate-600">
-              Upload a file to see detected columns. Imperfect files are allowed; missing numbers become 0 and missing platform defaults to eBay.
+              Upload a file to see detected columns. Title and price are required; optional blanks become warnings.
             </div>
           )}
         </div>
       </div>
 
-      {warnings.length ? (
+      {warnings.length || requiredMappingMissing.length ? (
         <div className="rounded-2xl border border-[#FFD36B]/50 bg-[#FFD36B]/10 p-5">
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#8A5A00]">Warnings, not blockers</p>
           <ul className="mt-3 space-y-2 text-sm font-bold text-slate-700">
+            {requiredMappingMissing.map((field) => <li key={field}>- Map {field} before importing. It is required.</li>)}
             {warnings.map((warning) => <li key={warning}>- {warning}</li>)}
           </ul>
         </div>
@@ -391,51 +466,63 @@ export default function InventoryPage() {
       <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">Editable Dataset</p>
-            <h3 className="mt-1 text-2xl font-extrabold text-ink">Review or edit imported items</h3>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">Review</p>
+            <h3 className="mt-1 text-2xl font-extrabold text-ink">Confirm inventory before analysis</h3>
           </div>
           <div className="flex flex-wrap gap-3">
             <button type="button" onClick={addItem} disabled={!canAdd} className="bg-ivory text-ink disabled:opacity-40">
               Add Item
             </button>
-            <button type="button" onClick={() => setHasRun(true)} className="bg-[#070A18] text-white hover:bg-[#2B185F]">
-              Run Full Recovery Analysis
+            <button type="button" onClick={runAnalysis} disabled={!canAnalyzeItems} className="bg-[#070A18] text-white hover:bg-[#2B185F] disabled:opacity-40">
+              {canAnalyzeItems ? 'Run Full Recovery Analysis' : 'Fix Required Fields First'}
             </button>
           </div>
         </div>
 
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <ScoreCard title="Total Items" value={itemSummary.total} helper="Rows currently staged for analysis." tone="dark" />
+          <ScoreCard title="Missing Titles" value={itemSummary.missingTitles} helper="Required before analysis can run." tone={itemSummary.missingTitles ? 'danger' : 'success'} />
+          <ScoreCard title="Invalid Prices" value={itemSummary.invalidPrices} helper="Required price must be above $0." tone={itemSummary.invalidPrices ? 'danger' : 'success'} />
+        </div>
+
         <div className="mt-5 space-y-3">
-          {items.map((item, index) => (
-            <div key={item.id} className="grid gap-3 rounded-2xl border border-tan/80 bg-ivory p-4 lg:grid-cols-[1.5fr_0.7fr_0.7fr_0.8fr_0.9fr_0.7fr_auto]">
-              <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
-                Title
-                <input value={item.title} onChange={(e) => updateItem(item.id, 'title', e.target.value)} placeholder={`Item ${index + 1} title`} />
-              </label>
-              <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
-                Price
-                <input type="number" min={0} step="0.01" value={item.price} onChange={(e) => updateItem(item.id, 'price', Number(e.target.value))} />
-              </label>
-              <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
-                Cost
-                <input type="number" min={0} step="0.01" value={item.cost} onChange={(e) => updateItem(item.id, 'cost', Number(e.target.value))} />
-              </label>
-              <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
-                Platform
-                <input value={item.platform} onChange={(e) => updateItem(item.id, 'platform', e.target.value)} />
-              </label>
-              <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
-                Condition
-                <input value={item.condition} onChange={(e) => updateItem(item.id, 'condition', e.target.value)} />
-              </label>
-              <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
-                Shipping
-                <input type="number" min={0} step="0.01" value={item.shipping} onChange={(e) => updateItem(item.id, 'shipping', Number(e.target.value))} />
-              </label>
-              <button type="button" onClick={() => removeItem(item.id)} disabled={!canRemove} className="self-end bg-white text-red-700 disabled:opacity-30">
-                Remove
-              </button>
-            </div>
-          ))}
+          {items.map((item, index) => {
+            const missingTitle = !item.title.trim();
+            const invalidPrice = item.price <= 0;
+            return (
+              <div key={item.id} className={`grid gap-3 rounded-2xl border p-4 lg:grid-cols-[1.5fr_0.7fr_0.7fr_0.8fr_0.9fr_0.7fr_auto] ${missingTitle || invalidPrice ? 'border-red-200 bg-red-50' : 'border-tan/80 bg-ivory'}`}>
+                <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
+                  Title
+                  <input value={item.title} onChange={(e) => updateItem(item.id, 'title', e.target.value)} placeholder={`Item ${index + 1} title`} />
+                  {missingTitle ? <span className="mt-1 block text-xs text-red-700">Required</span> : null}
+                </label>
+                <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
+                  Price
+                  <input type="number" min={0} step="0.01" value={item.price} onChange={(e) => updateItem(item.id, 'price', Number(e.target.value))} />
+                  {invalidPrice ? <span className="mt-1 block text-xs text-red-700">Must be above $0</span> : null}
+                </label>
+                <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
+                  Cost
+                  <input type="number" min={0} step="0.01" value={item.cost} onChange={(e) => updateItem(item.id, 'cost', Number(e.target.value))} />
+                </label>
+                <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
+                  Platform
+                  <input value={item.platform} onChange={(e) => updateItem(item.id, 'platform', e.target.value)} />
+                </label>
+                <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
+                  Condition
+                  <input value={item.condition} onChange={(e) => updateItem(item.id, 'condition', e.target.value)} />
+                </label>
+                <label className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
+                  Shipping
+                  <input type="number" min={0} step="0.01" value={item.shipping} onChange={(e) => updateItem(item.id, 'shipping', Number(e.target.value))} />
+                </label>
+                <button type="button" onClick={() => removeItem(item.id)} disabled={!canRemove} className="self-end bg-white text-red-700 disabled:opacity-30">
+                  Remove
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -463,7 +550,7 @@ export default function InventoryPage() {
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div>
                       <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-sage">Priority {index + 1}</p>
-                      <h4 className="mt-2 text-xl font-extrabold text-ink">{item.title || 'Untitled inventory item'}</h4>
+                      <h4 className="mt-2 text-xl font-extrabold text-ink">{item.title}</h4>
                       <p className="mt-2 text-sm font-bold text-slate-600">{item.platform} - {item.condition || 'Condition missing'} - shipping ${item.shipping.toFixed(2)}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -509,9 +596,9 @@ export default function InventoryPage() {
       ) : (
         <div className="rounded-2xl border border-dashed border-tan bg-white p-8 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Ready When You Are</p>
-          <h3 className="mt-3 text-3xl font-extrabold text-ink">Upload a file or edit the dataset, then run the recovery analysis.</h3>
+          <h3 className="mt-3 text-3xl font-extrabold text-ink">Upload, map, review, then run the recovery analysis.</h3>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600">
-            The output will show total recoverable money, top items to fix, realistic ROI, and an action list a reseller can use during a daily inventory review.
+            Title and price are required so the money math stays grounded. Optional fields can stay imperfect and will show warnings instead of blocking the flow.
           </p>
         </div>
       )}
