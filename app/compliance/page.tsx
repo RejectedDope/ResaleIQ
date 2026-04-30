@@ -26,9 +26,9 @@ export default function CompliancePage() {
     <section className="space-y-8">
       <div className="rounded-2xl border border-[#29204E] bg-[#070A18] p-6 text-white shadow-xl md:p-8">
         <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#C59BFF]">Compliance</p>
-        <h2 className="mt-3 text-4xl font-extrabold tracking-tight md:text-5xl">Reduce takedown risk before recovery work begins.</h2>
+        <h2 className="mt-3 text-4xl font-extrabold tracking-tight md:text-5xl">Fix the missing details that keep inventory from selling.</h2>
         <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-          Compliance checks are part of the recovery system: missing condition, size, material, safety, or grading data can bury inventory before price changes help.
+          Missing condition, size, material, safety, or grading data can bury inventory before price changes help.
         </p>
       </div>
 
@@ -42,7 +42,7 @@ export default function CompliancePage() {
         >
           <div className="mb-5">
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">Listing Metadata</p>
-            <h3 className="mt-1 text-2xl font-extrabold text-ink">Compliance inputs</h3>
+            <h3 className="mt-1 text-2xl font-extrabold text-ink">Fix inputs</h3>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {FIELD_NAMES.map((field) => (
@@ -64,30 +64,30 @@ export default function CompliancePage() {
             </label>
           </div>
 
-          <button className="mt-6 w-full bg-sage text-white hover:bg-[#4d654f]">Check Compliance</button>
+          <button className="mt-6 w-full bg-sage text-white hover:bg-[#4d654f]">Fix Compliance Risk</button>
         </form>
 
         {result ? (
           <div className="rounded-2xl border border-tan bg-white p-6 shadow-sm">
             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Compliance Score</p>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Money Visibility Score</p>
                 <p className="mt-2 text-5xl font-extrabold text-ink">{result.complianceScore}</p>
                 <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">{result.explanation}</p>
               </div>
               <RiskBadge level={result.riskLevel} />
             </div>
             <div className="mt-6 grid gap-4 md:grid-cols-2">
-              <RecommendationList title="Missing fields" items={result.missingFields.length ? result.missingFields : ['None']} />
-              <RecommendationList title="Required fixes" items={result.requiredFixes.length ? result.requiredFixes : ['No required fixes']} />
+              <RecommendationList title="Fix these fields" items={result.missingFields.length ? result.missingFields : ['No missing fields']} />
+              <RecommendationList title="Stop suppression" items={result.requiredFixes.length ? result.requiredFixes : ['No required fixes']} />
             </div>
           </div>
         ) : (
           <div className="flex min-h-[360px] items-center rounded-2xl border border-dashed border-tan bg-white p-8 shadow-sm">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-clay">Ready</p>
-              <h3 className="mt-3 text-3xl font-extrabold text-ink">Run the metadata check before deciding what to recover.</h3>
-              <p className="mt-4 text-sm leading-7 text-slate-600">The result will separate harmless gaps from issues that can suppress visibility or create marketplace risk.</p>
+              <h3 className="mt-3 text-3xl font-extrabold text-ink">Fix listing metadata before recovering the item.</h3>
+              <p className="mt-4 text-sm leading-7 text-slate-600">The result separates harmless gaps from issues that can suppress visibility or create marketplace risk.</p>
             </div>
           </div>
         )}
