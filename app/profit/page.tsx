@@ -24,9 +24,9 @@ export default function ProfitPage() {
     <section className="space-y-8">
       <div className="rounded-2xl border border-[#29204E] bg-[#070A18] p-6 text-white shadow-xl md:p-8">
         <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#C59BFF]">Margin Protection</p>
-        <h2 className="mt-3 text-4xl font-extrabold tracking-tight md:text-5xl">Find fake profit before it becomes dead inventory.</h2>
+        <h2 className="mt-3 text-4xl font-extrabold tracking-tight md:text-5xl">Stop selling at fake profit.</h2>
         <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-          The profit calculator exposes fee drag, shipping leakage, refund reserve, break-even pressure, and weak-margin risk in one place.
+          Expose fee drag, shipping leakage, refund reserve, break-even pressure, and weak-margin risk before an item becomes dead inventory.
         </p>
       </div>
 
@@ -40,7 +40,7 @@ export default function ProfitPage() {
         >
           <div className="mb-5">
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">Unit Economics</p>
-            <h3 className="mt-1 text-2xl font-extrabold text-ink">Margin inputs</h3>
+            <h3 className="mt-1 text-2xl font-extrabold text-ink">Profit inputs</h3>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {(Object.keys(INITIAL) as (keyof ProfitInput)[]).map((field) => (
@@ -50,7 +50,7 @@ export default function ProfitPage() {
               </label>
             ))}
           </div>
-          <button className="mt-6 w-full bg-[#070A18] text-white hover:bg-[#2B185F]">Calculate Protected Margin</button>
+          <button className="mt-6 w-full bg-[#070A18] text-white hover:bg-[#2B185F]">Stop Losing Money</button>
         </form>
 
         {result ? <ProfitBreakdown result={result} /> : null}
