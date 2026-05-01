@@ -260,6 +260,22 @@ function recommendationReasons(row: RowAnalysis) {
   return Array.from(new Set(reasons)).slice(0, 2);
 }
 
+function urgencyLabel(row: RowAnalysis) {
+  const risk = row.analysis.deadListingRisk.riskScore;
+  const daysLive = row.input.listingAgeDays;
+  const improvement = row.fixed.improvement;
+
+  if ((improvement >= 8 && risk >= 55) || (improvement >= 10 && daysLive >= 60)) return 'Fix Today - Quick Win';
+  if (improvement >= 5 || risk >= 45 || daysLive >= 75) return 'High Impact - Fix Soon';
+  return 'Low Priority - Monitor';
+}
+
+function urgencyClass(label: string) {
+  if (label.startsWith('Fix Today')) return 'bg-[#7AF59A] text-[#070A18]';
+  if (label.startsWith('High Impact')) return 'bg-amber-100 text-amber-950';
+  return 'bg-slate-200 text-slate-800';
+}
+
 function sourceLabel(source: InventorySource) {
   if (source === 'file') return 'File';
   if (source === 'photo') return 'Photo';
@@ -580,6 +596,7 @@ export default function InventoryPage() {
           {topItems.length ? topItems.map((row, index) => {
             const { item, input, analysis, current, fixed, band } = row;
             const reasons = recommendationReasons(row);
+            const urgency = urgencyLabel(row);
             return (
               <div key={item.id} className="rounded-2xl border border-tan/80 bg-ivory p-5">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -592,6 +609,7 @@ export default function InventoryPage() {
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    <span className={`rounded-full px-4 py-2 text-xs font-extrabold uppercase tracking-[0.12em] ${urgencyClass(urgency)}`}>{urgency}</span>
                     <RiskBadge level={analysis.deadListingRisk.riskLevel} />
                     <span className="rounded-full bg-[#070A18] px-4 py-2 text-xs font-extrabold uppercase tracking-[0.12em] text-white">Fix Now: {analysis.deadListingRisk.recommendedAction}</span>
                   </div>
