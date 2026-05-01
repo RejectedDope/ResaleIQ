@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 
 const links = [
   { href: '/', label: 'Money Dashboard' },
-  { href: '/inventory', label: 'Test My Inventory' },
+  { href: '/inventory', label: 'Your Inventory' },
   { href: '/dead-listings', label: 'Recover Inventory' },
   { href: '/analyze', label: 'Fix One Item' },
   { href: '/compliance', label: 'Fix Compliance' },
