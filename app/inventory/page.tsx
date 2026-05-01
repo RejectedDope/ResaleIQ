@@ -225,6 +225,41 @@ function optimizedTitle(input: ListingInput) {
   return [input.brand, input.title, input.condition].filter(Boolean).join(' ').replace(/\s+/g, ' ').slice(0, 80);
 }
 
+function recommendationReasons(row: RowAnalysis) {
+  const { input, analysis, current, fixed } = row;
+  const reasons: string[] = [];
+
+  if (analysis.deadListingRisk.recommendedAction === 'Reprice' || fixed.price < input.targetSalePrice) {
+    reasons.push('Your price is higher than similar listings.');
+  }
+
+  if (input.title.trim().length < 45) {
+    reasons.push('This title may be limiting visibility.');
+  }
+
+  if (analysis.deadListingRisk.riskScore >= 60) {
+    reasons.push('Items like this usually need a faster fix.');
+  }
+
+  if (current.roi < 50) {
+    reasons.push('The current margin is not giving you much room.');
+  }
+
+  if (analysis.deadListingRisk.recommendedAction === 'Crosslist') {
+    reasons.push('This item may do better on another marketplace.');
+  }
+
+  if (analysis.deadListingRisk.recommendedAction === 'Bundle') {
+    reasons.push('Shipping is taking too much of the profit.');
+  }
+
+  if (!reasons.length) {
+    reasons.push('A small update can help this item get seen again.');
+  }
+
+  return Array.from(new Set(reasons)).slice(0, 2);
+}
+
 function sourceLabel(source: InventorySource) {
   if (source === 'file') return 'File';
   if (source === 'photo') return 'Photo';
@@ -544,6 +579,7 @@ export default function InventoryPage() {
         <div className="mt-5 grid gap-4">
           {topItems.length ? topItems.map((row, index) => {
             const { item, input, analysis, current, fixed, band } = row;
+            const reasons = recommendationReasons(row);
             return (
               <div key={item.id} className="rounded-2xl border border-tan/80 bg-ivory p-5">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -563,7 +599,7 @@ export default function InventoryPage() {
 
                 <div className="mt-5 grid gap-3 lg:grid-cols-[0.85fr_0.85fr_1.2fr_auto]">
                   <div className="rounded-2xl bg-white p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Current</p><p className="mt-2 text-sm font-bold text-slate-700">Price ${current.price.toFixed(0)}</p><p className="mt-1 text-sm font-bold text-slate-700">ROI {current.roi}%</p></div>
-                  <div className="rounded-2xl bg-[#070A18] p-4 text-white"><p className="text-xs font-bold uppercase tracking-[0.16em] text-[#7AF59A]">After Fix</p><p className="mt-2 text-sm font-bold">New price ${fixed.price.toFixed(0)}</p><p className="mt-1 text-xl font-extrabold text-[#7AF59A]">+${fixed.improvement.toFixed(0)} profit</p></div>
+                  <div className="rounded-2xl bg-[#070A18] p-4 text-white"><p className="text-xs font-bold uppercase tracking-[0.16em] text-[#7AF59A]">After Fix</p><p className="mt-2 text-sm font-bold">New price ${fixed.price.toFixed(0)}</p><p className="mt-1 text-xl font-extrabold text-[#7AF59A]">+${fixed.improvement.toFixed(0)} profit</p><div className="mt-3 space-y-1 text-sm font-semibold leading-5 text-slate-200">{reasons.map((reason) => <p key={reason}>{reason}</p>)}</div></div>
                   <div className="rounded-2xl bg-white p-4 text-sm font-bold leading-6 text-slate-700"><p className="text-xs font-extrabold uppercase tracking-[0.16em] text-slate-500">Apply this</p><p className="mt-2">Title: {optimizedTitle(input)}</p><p>Price between ${band.low.toFixed(0)}-${band.high.toFixed(0)}</p></div>
                   <div className="flex flex-col gap-2 lg:min-w-[150px]"><button type="button" onClick={() => setConfirmingItemId(item.id)} className="bg-[#7AF59A] text-[#070A18]">Mark as Fixed</button><button type="button" onClick={() => setMessage(`${item.title} re-checked. Current ROI is ${current.roi}% and risk is ${analysis.deadListingRisk.riskScore}.`)} className="bg-white text-ink">Re-check</button></div>
                 </div>
