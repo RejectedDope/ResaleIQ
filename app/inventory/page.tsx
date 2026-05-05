@@ -122,7 +122,9 @@ function sampleValues(rows: ParsedRow[], column: string) {
 function textScore(rows: ParsedRow[], column: string) {
   const values = sampleValues(rows, column);
   const textValues = values.filter((value) => text(value).length >= 4 && toNumber(value) === 0 && /[a-z]/i.test(text(value)));
-  return textValues.length * 2 + textValues.reduce((sum, value) => sum + text(value).length, 0) / Math.max(textValues.length, 1) / 12;
+  return textValues.length * 2 + textValues.reduce((sum: number, value) => {
+    return sum + String(text(value)).length;
+  }, 0) / Math.max(textValues.length, 1) / 12;
 }
 
 function moneyScore(rows: ParsedRow[], column: string) {
@@ -414,10 +416,10 @@ export default function InventoryPage() {
   const pendingRows = prioritized.filter((row) => row.item.status === 'pending');
   const completedRows = prioritized.filter((row) => row.item.status === 'completed');
   const topItems = activeRows.slice(0, 5);
-  const totalRecoverable = activeRows.concat(pendingRows).reduce((sum, row) => sum + row.fixed.improvement, 0);
-  const potentialRecovered = completedRows.reduce((sum, row) => sum + row.fixed.improvement, 0);
-  const pendingPotential = pendingRows.reduce((sum, row) => sum + row.fixed.improvement, 0);
-  const averageRoi = Math.round(prioritized.reduce((sum, row) => sum + row.current.roi, 0) / Math.max(prioritized.length, 1));
+  const totalRecoverable = activeRows.concat(pendingRows).reduce((sum: number, row) => sum + Number(row.fixed.improvement), 0);
+  const potentialRecovered = completedRows.reduce((sum: number, row) => sum + Number(row.fixed.improvement), 0);
+  const pendingPotential = pendingRows.reduce((sum: number, row) => sum + Number(row.fixed.improvement), 0);
+  const averageRoi = Math.round(prioritized.reduce((sum: number, row) => sum + Number(row.current.roi), 0) / Math.max(prioritized.length, 1));
   const itemSummary = {
     total: items.length,
     missingTitles: items.filter((item) => !item.title.trim()).length,
