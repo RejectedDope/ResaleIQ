@@ -24,11 +24,11 @@ body {
 input,
 select,
 textarea {
-  @apply w-full rounded-2xl border border-[#2A3144] bg-[#101522] px-4 py-3 text-sm font-medium text-[#F4EFE6] shadow-sm transition focus:border-sage focus:outline-none focus:ring-4 focus:ring-sage/10;
+  @apply w-full rounded-md border border-[#2A3144] bg-[#101522] px-4 py-3 text-sm font-medium text-[#F4EFE6] shadow-sm transition focus:border-[#c8ad7f] focus:outline-none focus:ring-2 focus:ring-[#c8ad7f]/20;
 }
 
 button {
-  @apply rounded-2xl px-5 py-3 font-bold transition;
+  @apply rounded-md px-3 py-2 font-bold transition;
 }
 
 a {
