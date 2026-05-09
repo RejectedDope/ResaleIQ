@@ -90,7 +90,7 @@ export default function InventoryPage() {
   const [columns, setColumns] = useState<string[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({ title: '', price: '', cost: '', platform: '', quantity: '', listingAgeDays: '', category: '' });
   const [pastedText, setPastedText] = useState('');
-  const [message, setMessage] = useState('Upload CSV/XLSX, drop screenshots/photos, or paste text. We will help map the fields.');
+  const [message, setMessage] = useState('Upload spreadsheets, screenshots, item photos, or pasted text. Messy inventory is okay.');
 
   const canAnalyze = mapping.title && (mapping.price || mapping.cost) && rawRows.length > 0;
   const normalized = useMemo(() => canAnalyze ? rawRows.map((r) => toInput(r, mapping)) : [], [rawRows, mapping, canAnalyze]);
@@ -116,7 +116,7 @@ export default function InventoryPage() {
     const auto: Record<string, string> = { title: '', price: '', cost: '', platform: '', quantity: '', listingAgeDays: '', category: '' };
     for (const key of Object.keys(auto)) auto[key] = findMatch(nextCols, fieldAliases[key]);
     setMapping(auto);
-    setMessage('We found possible inventory data. Please confirm the field matches below.');
+    setMessage("We found possible inventory data. Let's confirm the fields.");
   }
 
   function parsePastedText() {
@@ -130,7 +130,7 @@ export default function InventoryPage() {
     <p className="text-sm text-slate-300">{message}</p>
 
     <div className="grid gap-4 md:grid-cols-2">
-      <label className="rounded-2xl border border-dashed border-[#3A4258] bg-[#121722] p-4 text-sm font-bold">Upload CSV or XLSX
+      <label className="rounded-2xl border border-dashed border-[#3A4258] bg-[#121722] p-4 text-sm font-bold">Upload Spreadsheet, Screenshot, or Item Photos
         <input className="mt-3" type="file" accept=".csv,.xlsx,.xls,image/*" onChange={(e) => handleFile(e.target.files?.[0])} />
       </label>
       <div className="rounded-2xl border border-[#2A3144] bg-[#121722] p-4">
