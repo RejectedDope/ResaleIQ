@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 * {
@@ -15,16 +15,16 @@ html {
 }
 
 body {
-  @apply min-h-screen bg-ivory text-ink antialiased;
+  @apply min-h-screen bg-[#080B12] text-[#F4EFE6] antialiased;
   background:
-    radial-gradient(circle at top left, rgba(124, 92, 255, 0.12), transparent 32rem),
-    linear-gradient(180deg, #fbfaf6 0%, #f3eee4 100%);
+    radial-gradient(circle at top left, rgba(214, 186, 122, 0.12), transparent 32rem),
+    linear-gradient(180deg, #090D15 0%, #0B101A 100%);
 }
 
 input,
 select,
 textarea {
-  @apply w-full rounded-2xl border border-tan bg-white px-4 py-3 text-sm font-medium text-ink shadow-sm transition focus:border-sage focus:outline-none focus:ring-4 focus:ring-sage/10;
+  @apply w-full rounded-2xl border border-[#2A3144] bg-[#101522] px-4 py-3 text-sm font-medium text-[#F4EFE6] shadow-sm transition focus:border-sage focus:outline-none focus:ring-4 focus:ring-sage/10;
 }
 
 button {
