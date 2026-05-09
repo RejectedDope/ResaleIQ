@@ -11,5 +11,5 @@ const links = [
 
 export default function Nav() {
   const pathname = usePathname();
-  return <aside className="w-full lg:w-56"><div className="rounded-xl border border-[#1f2533] bg-[#0f141d] p-2">{links.map((l)=><Link key={l.href} href={l.href} className={`mb-1 block rounded-md px-3 py-2 text-sm ${pathname.startsWith(l.href)?'bg-[#1a2230] text-white':'text-[#a9b1bf] hover:bg-[#171e2a]'}`}>{l.label}</Link>)}</div></aside>;
+  return <aside className="w-[250px] border-r border-[#1c2538] bg-[#0a1220] p-4"><div className="mb-6 flex items-center gap-2 text-xl font-semibold"><span className="text-[#d8b46a]">◈</span>ResaleIQ</div><nav className="space-y-1">{links.map((l)=><Link key={l.href} href={l.href} className={`block rounded-md px-3 py-2 text-sm ${pathname.startsWith(l.href)?'bg-[#1a2335] text-white':'text-[#aab5c8] hover:bg-[#151d2d]'}`}>{l.label}</Link>)}</nav><div className="mt-8 rounded-lg border border-[#2a3650] p-3 text-sm text-[#b9c4d7]"><p className="font-semibold">Unlock more insights</p><button className="mt-3 w-full bg-[#d8b46a] text-[#0b0f17]">Upgrade to Pro</button></div></aside>;
 }
