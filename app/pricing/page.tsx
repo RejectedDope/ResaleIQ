@@ -1,0 +1,1 @@
+export default function Pricing(){return <section className="space-y-4"><h1 className="text-2xl font-bold">Pricing</h1><div className="rounded-2xl border border-[#2A3144] bg-[#0E1320] p-4">$29/mo — Unlimited inventory scans and saved recovery history.</div></section>}

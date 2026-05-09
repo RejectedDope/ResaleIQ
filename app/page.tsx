@@ -14,7 +14,7 @@ export default function HomePage() {
         <p className="mt-4 max-w-3xl text-sm leading-7 text-[#C4C9D4]">Upload spreadsheets, screenshots, item photos, or messy reseller exports. ResaleIQ identifies stale inventory, pricing mistakes, trapped profit, and recovery actions automatically.</p>
         <div className="mt-7 flex flex-wrap gap-3">
           <a href="/inventory" className="rounded-2xl bg-[#D6BA7A] px-5 py-3 text-sm font-extrabold text-[#0A0D14]">Start Free Inventory Scan</a>
-          <a href="/inventory" className="rounded-2xl border border-[#3D445B] bg-[#121722] px-5 py-3 text-sm font-bold">See Sample Recovery Report</a>
+          <a href="/sample-report" className="rounded-2xl border border-[#3D445B] bg-[#121722] px-5 py-3 text-sm font-bold">See Sample Recovery Report</a>
         </div>
       </div>
 
@@ -33,7 +33,7 @@ export default function HomePage() {
           <span className="rounded-full border border-[#394159] px-3 py-2">Image Upload</span>
           <span className="rounded-full border border-[#394159] px-3 py-2">Screenshot Upload</span>
         </div>
-        <a href="/inventory" className="mt-5 inline-block rounded-2xl bg-[#D6BA7A] px-5 py-3 text-sm font-extrabold text-[#0A0D14]">Go to Inventory Intake</a>
+        <a href="/inventory" className="mt-5 inline-block rounded-2xl bg-[#D6BA7A] px-5 py-3 text-sm font-extrabold text-[#0A0D14]">Start Free Inventory Scan</a>
       </div>
 
       <div className="rounded-3xl border border-[#2A3144] bg-[#0E1320] p-6 text-[#F6F1E8]">
