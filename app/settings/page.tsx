@@ -1,0 +1,1 @@
+export default function Settings(){return <section className="space-y-3"><h1 className="text-2xl font-bold">Settings</h1><form action="/api/auth/logout" method="post"><button className="bg-[#D6BA7A] text-[#0A0D14]">Sign out</button></form></section>}

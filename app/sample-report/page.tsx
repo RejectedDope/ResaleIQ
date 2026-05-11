@@ -1,0 +1,1 @@
+export default function SampleReport(){return <section className="space-y-4"><h1 className="text-2xl font-bold">Sample Recovery Report</h1><div className="rounded-2xl border border-[#2A3144] bg-[#0E1320] p-4"><p>Coach Leather Tote · Listed 143 days</p><p>Recovery Opportunity: +$42</p><p>Action Needed: Relist + Reduce Price 12%</p></div></section>}

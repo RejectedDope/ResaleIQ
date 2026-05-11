@@ -1,92 +1,101 @@
-import { DeadListingResult, ListingInput } from './types';
+import { DeadListingResult, LifecycleStage, ListingInput, RiskTier } from './types';
 
-function includesAny(value: string, terms: string[]) {
-  const normalized = value.toLowerCase();
-  return terms.some((term) => normalized.includes(term));
+const clamp = (v: number, min = 0, max = 100) => Math.min(max, Math.max(min, v));
+
+function ctrStatus(ctr: number): DeadListingResult['ctrStatus'] {
+  if (ctr < 0.5) return 'Critical';
+  if (ctr < 1) return 'Weak';
+  return 'Healthy';
 }
 
-export function evaluateDeadListingRisk(args: {
-  input: ListingInput;
-  complianceScore: number;
-  profitScore: number;
-  platformMismatch: boolean;
-}): DeadListingResult {
-  let riskScore = 0;
-  const issues: string[] = [];
-  const category = args.input.category.toLowerCase();
-  const titleLength = args.input.title.trim().length;
-  const lowTicket = args.input.targetSalePrice < 25;
-  const veryStale = args.input.listingAgeDays > 90;
-  const stale = args.input.listingAgeDays > 60;
-  const weakProfit = args.profitScore < 50;
-  const badProfit = args.profitScore < 35;
-  const complianceWeak = args.complianceScore < 70;
-  const regulatedRisk = includesAny(category, ['children', 'import', 'toy']) && !args.input.safetyDocs;
-  const collectibleWrongPlatform = includesAny(category, ['coin', 'collectible', 'vintage']) && args.platformMismatch;
-  const bulkyWrongPlatform = includesAny(category, ['furniture', 'local', 'bulky']) && args.platformMismatch;
+function decayTier(score: number): RiskTier {
+  if (score >= 80) return 'CRITICAL';
+  if (score >= 60) return 'HIGH';
+  if (score >= 35) return 'MODERATE';
+  return 'LOW';
+}
 
-  if (stale) {
-    riskScore += 25;
-    issues.push('Listing age exceeds 60 days');
-  }
+function lifecycle(args: { age: number; daysSinceSale: number; decay: number; recoveryProbability: number }): LifecycleStage {
+  if (args.decay >= 85 && args.daysSinceSale > 45) return 'Dead Inventory';
+  if (args.decay >= 75 && args.recoveryProbability < 35) return 'Liquidation Candidate';
+  if (args.decay >= 60) return 'Recovery Candidate';
+  if (args.decay >= 45) return 'Decaying';
+  if (args.age > 45 || args.daysSinceSale > 10) return 'Slowing';
+  if (args.age > 14) return 'Active';
+  return 'Fresh';
+}
 
-  if (args.input.listingAgeDays > 120) {
-    riskScore += 10;
-    issues.push('Listing is extremely stale');
-  }
+export function evaluateDeadListingRisk(args: { input: ListingInput; complianceScore: number; profitScore: number; platformMismatch: boolean }): DeadListingResult {
+  const i = args.input;
+  const ctr = i.impressions > 0 ? (i.clicks / i.impressions) * 100 : 0;
+  const ctrState = ctrStatus(ctr);
+  const impressionDrop = clamp(-i.impressionTrend7d);
 
-  if (complianceWeak) {
-    riskScore += 20;
-    issues.push('Compliance score below 70');
-  }
+  const decayScore = clamp(
+    impressionDrop * 0.32 +
+      clamp(100 - ctr * 28) * 0.2 +
+      clamp(i.daysSinceEngagement * 2.2) * 0.14 +
+      clamp(i.daysSinceSale * 1.7) * 0.14 +
+      clamp(i.listingAgeDays * 0.6) * 0.1 +
+      clamp(i.adPerformanceDecline) * 0.1,
+  );
 
-  if (weakProfit) {
-    riskScore += 15;
-    issues.push('Profit score below 50');
-  }
+  const exposureScore = clamp(100 - (impressionDrop * 0.5 + clamp(100 - ctr * 30) * 0.35 + clamp(i.daysSinceEngagement * 2) * 0.15));
 
-  if (titleLength < 45) {
-    riskScore += 15;
-    issues.push('Title length is under 45 characters');
-  }
+  const listingHealthScore = clamp(
+    exposureScore * 0.28 +
+      clamp(ctr * 35) * 0.2 +
+      clamp(i.salesCount * 20) * 0.12 +
+      i.pricingCompetitiveness * 0.1 +
+      i.itemSpecificsCompleteness * 0.1 +
+      i.titleOptimization * 0.1 +
+      i.imageQuality * 0.1,
+  );
 
-  if (!args.input.condition.trim()) {
-    riskScore += 10;
-    issues.push('Condition missing');
-  }
+  const recoveryProbability = clamp(100 - decayScore + (args.profitScore - 50) * 0.4);
+  const stage = lifecycle({ age: i.listingAgeDays, daysSinceSale: i.daysSinceSale, decay: decayScore, recoveryProbability });
 
-  if (args.platformMismatch) {
-    riskScore += 10;
-    issues.push('Current platform appears mismatched');
-  }
+  const problems: string[] = [];
+  if (impressionDrop > 70) problems.push('Impression collapse (>70%)');
+  if (ctrState !== 'Healthy') problems.push(`CTR is ${ctrState.toLowerCase()} (${ctr.toFixed(2)}%)`);
+  if (i.daysSinceSale > 30) problems.push('No sale in over 30 days');
+  if (i.daysSinceEngagement > 14) problems.push('Engagement is stale');
+  if (args.platformMismatch) problems.push('Marketplace/platform mismatch likely suppressing reach');
 
-  if (regulatedRisk) {
-    riskScore += 15;
-    issues.push('Regulated category lacks safety documentation');
-  }
-
-  const riskLevel: DeadListingResult['riskLevel'] = riskScore >= 60 ? 'High' : riskScore >= 30 ? 'Medium' : 'Low';
+  const recommendedActions = [
+    'End and relist with a fresh hero image',
+    'Rewrite title for stronger keyword relevance',
+    'Improve item specifics and condition detail',
+  ];
+  if (ctr < 1) recommendedActions.push('Replace cover image and run A/B image test');
+  if (i.pricingCompetitiveness < 60) recommendedActions.push('Adjust price to competitive range');
+  if (args.platformMismatch) recommendedActions.push('Crosslist to a stronger marketplace');
+  if (stage === 'Liquidation Candidate') recommendedActions.push('Move to liquidation workflow');
 
   let recommendedAction: DeadListingResult['recommendedAction'] = 'Hold';
+  if (stage === 'Liquidation Candidate' || stage === 'Dead Inventory') recommendedAction = 'Donate/Liquidate';
+  else if (args.platformMismatch) recommendedAction = 'Crosslist';
+  else if (ctr < 0.5) recommendedAction = 'Relist';
+  else if (i.pricingCompetitiveness < 60) recommendedAction = 'Reprice';
 
-  if ((badProfit && veryStale) || (regulatedRisk && weakProfit) || (lowTicket && veryStale && weakProfit)) {
-    recommendedAction = 'Donate/Liquidate';
-  } else if (lowTicket || includesAny(category, ['bundle', 'jewelry lot', 'beauty', 'skincare'])) {
-    recommendedAction = 'Bundle';
-  } else if (collectibleWrongPlatform || bulkyWrongPlatform || args.platformMismatch) {
-    recommendedAction = 'Crosslist';
-  } else if (stale && weakProfit) {
-    recommendedAction = 'Reprice';
-  } else if (stale || complianceWeak || titleLength < 45) {
-    recommendedAction = 'Relist';
-  } else if (args.profitScore >= 70 && args.input.listingAgeDays <= 45) {
-    recommendedAction = 'Hold';
-  }
+  const riskScore = Math.round(decayScore);
+  const riskLevel = riskScore >= 70 ? 'High' : riskScore >= 40 ? 'Medium' : 'Low';
 
   return {
-    riskScore: Math.min(riskScore, 100),
+    riskScore,
     riskLevel,
-    topIssue: issues[0] ?? 'No major issue detected',
+    topIssue: problems[0] ?? 'No major issue detected',
     recommendedAction,
+    ctr,
+    ctrStatus: ctrState,
+    listingHealthScore: Math.round(listingHealthScore),
+    exposureScore: Math.round(exposureScore),
+    decayScore: Math.round(decayScore),
+    decayTier: decayTier(decayScore),
+    lifecycleStage: stage,
+    recoveryPriority: Math.round(clamp(decayScore + (100 - recoveryProbability) * 0.4)),
+    recoveryProbability: Math.round(recoveryProbability),
+    majorProblems: problems,
+    recommendedActions,
   };
 }
