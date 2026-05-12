@@ -1,209 +1,221 @@
-# ResaleIQ — Rejected Economy
+# ResaleIQ
 
-## Overview
+## Inventory Recovery Intelligence for Resellers
 
-ResaleIQ is a reseller compliance, profit, and listing intelligence web app built for sellers on eBay, Poshmark, Facebook Marketplace, Mercari, and other resale platforms.
+ResaleIQ helps resellers identify stale inventory, pricing problems, listing weaknesses, shipping friction, and trapped profit opportunities before inventory quietly dies.
 
-This is not a generic listing generator.
+This is not a generic reseller dashboard.
 
-The product is designed to answer:
+ResaleIQ is focused on:
 
-- Should I sell this?
-- Where should I sell it?
-- How much profit is actually left after fees?
-- Is this listing stale, overpriced, or hurting cash flow?
-- What should I relist, reprice, crosslist, or liquidate?
+- inventory recovery
+- stale listing detection
+- recovery prioritization
+- operational visibility
+- sell-through improvement
+- actionable recovery recommendations
 
-Core focus:
+The goal is simple:
 
-**Margin protection first. Listing generation second.**
-
----
-
-## MVP Features
-
-### Dashboard
-- Listings analyzed
-- High-risk listings
-- Dead inventory alerts
-- Estimated profit leaks
-- Average listing health score
-- Urgent recovery actions
-- Dead Inventory Audit paid offer CTA
-
-### New Item Analysis
-- Compliance score
-- Profit score
-- Visibility score
-- Pricing strategy
-- Platform recommendation
-- Listing output generation
-- Recovery recommendations
-
-### Compliance Checker
-- Missing field detection
-- Listing compliance scoring
-- Risk levels
-- Required fixes
-
-### Profit Calculator
-- Net profit
-- ROI
-- Margin
-- Break-even pricing
-- Weak profit warnings
-
-### Dead Listing Detector
-- Dead listing risk scoring
-- Relist / reprice / crosslist / liquidate recommendations
+> Help sellers understand what inventory needs intervention first and why.
 
 ---
 
-## Tech Stack
+# Core Product Thesis
 
-- Next.js
-- TypeScript
+Most reseller tools focus on:
+
+- listing faster
+- crossposting
+- automation
+- inventory syncing
+
+ResaleIQ focuses on:
+
+- identifying stale inventory
+- detecting operational problems
+- prioritizing recovery opportunities
+- helping sellers recover trapped money
+
+The product is designed around:
+
+> upload → analyze → prioritize → recover
+
+---
+
+# Target Users
+
+Primary users:
+
+- eBay-first resellers
+- multi-platform resellers
+- sellers with 100–2,000 active listings
+- overwhelmed inventory-heavy sellers
+- clothing, vintage, collectible, mixed inventory sellers
+
+ResaleIQ is platform-aware but initially optimized for:
+
+- eBay
+- spreadsheet-based inventory workflows
+
+---
+
+# MVP Goals
+
+The first version focuses only on:
+
+## Inventory Upload
+
+- CSV upload
+- XLSX upload
+- messy spreadsheet handling
+
+## Inventory Recovery Analysis
+
+- stale inventory detection
+- pricing risk detection
+- listing weakness detection
+- shipping friction analysis
+- trapped inventory identification
+
+## Recovery Prioritization
+
+- Fix These First
+- High Stale Risk
+- Listings Needing Intervention
+- actionable recovery recommendations
+
+## Sample Recovery Reports
+
+- believable operational outputs
+- reseller-focused language
+- emotionally recognizable inventory problems
+
+---
+
+# MVP Constraints
+
+To avoid feature sprawl, the MVP intentionally does not include:
+
+- crosslisting
+- marketplace APIs
+- OCR/image AI
+- enterprise dashboards
+- fake analytics
+- AI-generated hype features
+- complex automation systems
+- dead navigation
+- placeholder modules
+
+Every screen must support:
+
+> upload → analyze → prioritize → recover
+
+---
+
+# Product Philosophy
+
+ResaleIQ is not trying to become:
+
+- another crosslisting tool
+- another AI listing writer
+- another bloated reseller SaaS
+
+The product exists to help sellers:
+
+- understand why inventory is not selling
+- identify operational problems
+- recover visibility
+- reduce stale inventory
+- make better inventory decisions
+
+---
+
+# Planned Workflow
+
+1. User uploads inventory spreadsheet
+2. System normalizes inventory data
+3. Recovery engine analyzes inventory
+4. System prioritizes recovery opportunities
+5. User receives actionable recommendations
+6. User applies recovery actions
+
+---
+
+# Example Recovery Signals
+
+Examples of issues ResaleIQ may detect:
+
+- listings older than 180 days
+- low engagement inventory
+- weak title structures
+- pricing concerns
+- high shipping friction
+- missing inventory data
+- possible trapped capital
+
+---
+
+# Tech Stack
+
+Initial stack:
+
+- Next.js App Router
 - Tailwind CSS
-- App Router
-- Local mock data
-- No paid APIs required for V1
+- Supabase Auth
+- Supabase Postgres
+- Vercel deployment
 
 ---
 
-## Install
+# Guiding Principles
 
-```bash
-npm install
-```
-
----
-
-## Run Locally
-
-```bash
-npm run dev
-```
-
-Then open:
-
-```text
-http://localhost:3000
-```
+1. No fake functionality
+2. No dead routes
+3. No fake AI claims
+4. No unnecessary complexity
+5. Recommendation usefulness over technical sophistication
+6. Operational trust over feature quantity
+7. Fast validation over overengineering
 
 ---
 
-## Scoring Logic
+# Current Focus
 
-### Compliance Logic
+The current objective is:
 
-Located in:
+- validate recovery recommendations
+- validate reseller trust
+- validate repeated usage behavior
+- validate inventory recovery positioning
 
-```text
-/lib/compliance.ts
-```
+Not:
 
-Starts at 100 and deducts points for:
-
-- missing condition
-- missing size
-- non-standard size format
-- missing brand
-- missing color
-- missing material
-- regulated item documentation gaps
+- enterprise scale
+- massive automation
+- feature expansion
 
 ---
 
-### Profit Logic
+# Success Metrics
 
-Located in:
+Early success is measured by:
 
-```text
-/lib/profit.ts
-```
+- completed inventory uploads
+- repeated scans
+- recommendation engagement
+- recovery action usage
+- reseller trust in outputs
+- before/after inventory improvements
 
-Calculates:
+Not:
 
-- gross sale
-- total fees
-- promoted fees
-- refund reserve
-- net profit
-- ROI
-- margin
-- break-even price
+- vanity metrics
+- generic traffic
+- social hype
 
 ---
 
-### Dead Listing Logic
+# Status
 
-Located in:
-
-```text
-/lib/deadListing.ts
-```
-
-Scores stale inventory based on:
-
-- listing age
-- compliance weakness
-- weak profit
-- weak title
-- missing condition
-- platform mismatch
-
----
-
-## Monetization Path
-
-### First Paid Offer
-
-## Dead Inventory Audit
-
-Starting at $97
-
-Designed to convert free users into paid customers quickly.
-
-Focus:
-
-- stale inventory recovery
-- hidden profit leaks
-- pricing mistakes
-- relist and liquidation strategy
-
-Free tool → paid audit → recurring subscription
-
----
-
-## Future Phase 2
-
-### Planned API Integrations
-
-- eBay sold comps
-- eBay listing enhancement
-- marketplace crosslisting workflows
-- inventory sync
-
-### Planned AI Features
-
-- photo upload → item recognition
-- resale value estimation from images
-- authenticity support workflows
-- buy / skip sourcing mode
-
-### Subscription Expansion
-
-- reseller dashboard
-- recurring inventory audits
-- premium margin protection alerts
-- white-label reseller systems
-
----
-
-## Principle
-
-Do not optimize for prettier listings.
-
-Optimize for:
-
-**better decisions and stronger margin protection.**
+This repository is an active MVP rebuild focused on creating a clean, operational inventory recovery workflow for resellers.
