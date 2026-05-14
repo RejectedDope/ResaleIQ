@@ -1,7 +1,4 @@
-import Link from 'next/link';
 
-export default function HomePage() {
-  return (
     <main className="space-y-10">
       <section className="rounded-3xl border border-slate-800 bg-slate-900 p-8">
         <p className="text-xs uppercase tracking-[0.2em] text-violet-300">ResaleIQ Recovery Workflow</p>
